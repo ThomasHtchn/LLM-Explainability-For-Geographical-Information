@@ -12,4 +12,4 @@ Le risque avec la première comparaison étant que pour une capitale comme Copen
 ![Vizu top5](./data/top5plot.png)
 
 
-[ > Plot interactif](https://ThomasHtchn.github.io//LLM-Explainability-For-Geographical-Information/data/vizu-first-layer/smolLM3_vizu-first-layer_top10_th001_TTT.html)
+[ > Plot interactif](https://thomashtchn.github.io//LLM-Explainability-For-Geographical-Information/data/vizu-first-layer/smolLM3_vizu-first-layer_top10_th001_TTT.html)
