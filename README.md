@@ -10,3 +10,6 @@ Pour détecter si le nom de la capitale est présent dans le résidual steam :
 Le risque avec la première comparaison étant que pour une capitale comme Copenhagen tokenizé en "C" et "openhagen", le token "C" seul sera comptabilisé comme capital présent dans la couche.
 
 ![Vizu top5](./data/top5plot.png)
+
+
+[ > Plot interactif](https://ThomasHtchn.github.io//LLM-Explainability-For-Geographical-Information/data/vizu-first-layer/smolLM3_vizu-first-layer_top10_th001_TTT.html)
