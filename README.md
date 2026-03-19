@@ -13,3 +13,9 @@ Le risque avec la première comparaison étant que pour une capitale comme Copen
 
 
 [ > Plot interactif](https://thomashtchn.github.io//LLM-Explainability-For-Geographical-Information/data/vizu-first-layer/smolLM3_vizu-first-layer_top10_th001_TTT.html)
+
+[ > Stackbar par région du monde](https://thomashtchn.github.io//LLM-Explainability-For-Geographical-Information/data/vizu-first-layer/stackbar_first-layer-vizu_regions.html)
+
+Capitales non trouvées :
+
+![Capitales non trouvées](./data/capitales_non_trouvees.png)

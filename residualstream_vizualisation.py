@@ -158,4 +158,102 @@ def only_plot_layer_analysis(df):
     return fig
     
 
+def generate_hidden_states(model, tokenizer, country_name):
+    prompt = f"What is the capital city of {country_name}?"
+    messages = [
+        {"role": "system",
+            "content": (
+                f"You are an expert geographer. "
+                f"You have to give name of the capital city. "
+                f"Answer only with the capital city name "
+                f"without any other words or repetition of the question. Don't repeat the prompt neither. "
+                f"Example of answer: 'Paris'."
+            )
+        },
+        {"role": "user", "content": prompt}
+    ]
+    # Tokenize input prompt
 
+    inputs = tokenizer.apply_chat_template(
+        messages, 
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False
+    )
+    model_inputs = tokenizer([inputs], return_tensors="pt").to("cuda")
+    model_outputs = model.generate(**model_inputs, 
+                                   return_dict_in_generate=True, 
+                                   output_hidden_states=True) 
+    
+    generated_ids = model_outputs.sequences[0][len(model_inputs.input_ids[0]) :]
+    prediction = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+    return model_inputs, model_outputs.hidden_states[0], prediction
+
+def compute_stackbar_region(model, tokenizer, df_path, top_k=10, proba_threshold=0.01):
+
+    df = pd.read_csv(df_path)
+
+    results = []
+
+    for row in tqdm(df.itertuples(), total=len(df)):
+
+        country_name = row._1
+        region_name = row.Region
+        capital_name = row.Capital
+
+        inputs, hs, prediction = generate_hidden_states(model, tokenizer, country_name)
+
+        layer_idx, details = first_layer_detection(model, tokenizer, hs, capital_name, top_k, proba_threshold, 
+                          inputs, True, True, True)
+        
+        results.append({
+            "Layer" : layer_idx,
+            "Region" : region_name,
+            "Capital" : capital_name,
+            "Prediction" : prediction,
+            "Details" : details
+        })
+
+    df_results = pd.DataFrame(results)
+    
+    return df_results
+
+def plot_stackbar_region(df_results):
+
+    df_valid = df_results[df_results["Layer"] >= 0]
+
+    grouped = df_valid.groupby(["Layer", "Region"]).agg({
+        "Details": lambda x: "".join(x)
+    }).reset_index()
+
+    # Add counts
+    counts = df_valid.groupby(["Layer", "Region"]).size().reset_index(name="Count")
+
+    grouped = grouped.merge(counts, on=["Layer", "Region"])
+
+    color_map = {
+        "Europe": "blue",
+        "Asia": "red",
+        "Africa": "green",
+        "Europe/Asia": "yellow",
+        "North America": "brown",
+        "South America": "orange",
+        "Oceania": "purple"
+    }
+
+    fig = px.bar(
+        grouped,
+        x="Layer",
+        y="Count",
+        color="Region",
+        hover_data={
+            "Details": True
+        },
+        color_discrete_map=color_map,
+        title="Capitales détectées par couche (non cumulatif) par région du monde,<br>parmis le top 10 des tokens."
+    )
+    fig.update_layout(barmode="stack")
+    fig.update_layout(template="plotly")
+    fig.write_html("stackbar_first-layer-vizu_regions.html")
+    return fig
