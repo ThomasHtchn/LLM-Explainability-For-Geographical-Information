@@ -4,8 +4,6 @@ import jsonlines
 PREFIX = """You will be given data about a specific location randomly sampled from all human-populated locations on Earth.
 You give your rating keeping in mind that it is relative to all other human-populated locations on Earth (from all continents, countries, etc.).
 You provide ONLY your answer in the exact format "X.X." where 'X.X' represents your rating for the given topic.
-
-
 """
 
 ADJACENT_PIXELS = 12
