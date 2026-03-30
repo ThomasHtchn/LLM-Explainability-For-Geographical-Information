@@ -1,12 +1,15 @@
-from residualstream_utils import get_hidden_states, tokenize_prompt, remove_spaces
+from residualstream_utils import *
 from tqdm import tqdm
 import plotly.express as px
 import pandas as pd
 import torch
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 
-def verify_second_token(model, inputs, first_token_id, second_token_id):
+
+def verify_next_token(model, inputs, first_token_id, second_token_id):
     new_input_ids = torch.cat(
-        [inputs["input_ids"], torch.tensor([[first_token_id]], device=inputs["input_ids"].device)],
+        [inputs["input_ids"], torch.tensor([first_token_id], device=inputs["input_ids"].device)],
         dim=1
     )
 
@@ -20,8 +23,9 @@ def verify_second_token(model, inputs, first_token_id, second_token_id):
 
     return pred_token_id == second_token_id
 
+
 # Returns the index of the first layer in which the label's token is detected or -1 if not found among top_k
-def first_layer_detection(model, tokenizer, hidden_states, label, top_k, min_proba_threshold, 
+def first_layer_detection(model, tokenizer, hidden_states, label, country_name, top_k, min_proba_threshold, 
                           inputs, comp_text, comp_token, verif_sec_token):
     for i, h in enumerate(hidden_states, start=0):
         last_token_hidden = h[:, -1, :]  
@@ -42,7 +46,7 @@ def first_layer_detection(model, tokenizer, hidden_states, label, top_k, min_pro
                     prob = top_probs[0][j].item()
                     if prob < min_proba_threshold:
                         continue # filtre les proba trop faible
-                    info = f"<br>{label} [{decoded_token}] : {prob:.3f} | top {j+1}"
+                    info = f"<br>{country_name} [{decoded_token}] (text : {len(label_ids)}): {prob:.3f} | top {j+1}"
                     return i, info
                 
             # Comparaison token ids
@@ -54,14 +58,19 @@ def first_layer_detection(model, tokenizer, hidden_states, label, top_k, min_pro
                         continue # filtre les proba trop faible
                     
                     if(len(label_ids) == 1 or not verif_sec_token):
-                        info = f"<br>{label} [{decoded_token}] : {prob:.3f} | top {j+1}"
+                        info = f"<br>{country_name} [{decoded_token}] (tk) : {prob:.3f} | top {j+1}"
                         return i, info
                     # Multi token labels
-                    elif(verif_sec_token and verify_second_token(model, inputs, label_ids[0], label_ids[1])):
-                        info = f"<br>{label} [{decoded_token}, {tokenizer.decode(label_ids[1])}] : {prob:.3f} | top {j+1}"
+                    elif(len(label_ids) > 1 and verif_sec_token):
+                        for k in range(1, len(label_ids)):
+                            if not verify_next_token(model, inputs, label_ids[0:k], label_ids[k]):
+                                continue
+                        tks = ",".join(tokenizer.decode(tk) for tk in label_ids)
+                        info = f"<br>{country_name} [{tks}] (multi tks : {len(label_ids)}) : {prob:.3f} | top {j+1}"
                         return i, info
 
-    return -1, f"[{label}] "
+    return -1, country_name
+
 
 # Returns a list with the quantity of expected token found for each layer (not cumulative) and the quantity of not found
 def plot_layer_analysis(model, tokenizer, df, nb_layers=36, top_k=10, min_proba_threshold=0.01, 
@@ -190,47 +199,92 @@ def generate_hidden_states(model, tokenizer, country_name):
 
     return model_inputs, model_outputs.hidden_states[0], prediction
 
-def compute_stackbar_region(model, tokenizer, df_path, top_k=10, proba_threshold=0.01):
 
+def generate_hidden_states_multitask(model, tokenizer, task, country_name):
+    prompt = f"What is the {task} of {country_name}?"
+    messages = [
+        {"role": "system",
+            "content": (
+                f"You are an expert geographer. "
+                f"Answer what you are asked with only one word and "
+                f"without any other words or repetition of the question. Don't repeat the prompt neither. "
+            )
+        },
+        {"role": "user", "content": prompt}
+    ]
+
+    inputs = tokenizer.apply_chat_template(
+        messages, 
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False
+    )
+    model_inputs = tokenizer([inputs], return_tensors="pt").to("cuda")
+    model_outputs = model.generate(**model_inputs, 
+                                   return_dict_in_generate=True, 
+                                   output_hidden_states=True) 
+    
+    generated_ids = model_outputs.sequences[0][len(model_inputs.input_ids[0]) :]
+    prediction = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+    return model_inputs, model_outputs.hidden_states[0], prediction
+
+
+def compute_stackbar_region(model, tokenizer, df_path, task, top_k=10, proba_threshold=0.01):
     df = pd.read_csv(df_path)
-
     results = []
+    task_with_space = task.replace("_", " ")
 
-    for row in tqdm(df.itertuples(), total=len(df)):
+    pbar = tqdm(df.iterrows(), total=len(df))
+    for i, row in pbar:
+        country_name = row['Country_Name']
+        region_name = row["Continent"]
+        task_value = row[task]
 
-        country_name = row._1
-        region_name = row.Region
-        capital_name = row.Capital
+        pbar.set_description(f"[{i}] Task : {task_with_space}")
+        pbar.set_postfix(value=country_name)
 
-        inputs, hs, prediction = generate_hidden_states(model, tokenizer, country_name)
+        inputs, hs, prediction = generate_hidden_states_multitask(model, tokenizer, task_with_space, country_name)
 
-        layer_idx, details = first_layer_detection(model, tokenizer, hs, capital_name, top_k, proba_threshold, 
+        layer_idx, details = first_layer_detection(model, tokenizer, hs, task_value, country_name, top_k, proba_threshold, 
                           inputs, True, True, True)
         
+        # Not found
+        if(layer_idx == -1):
+            details = details + f" ({task_value})<br>"
+
         results.append({
             "Layer" : layer_idx,
             "Region" : region_name,
-            "Capital" : capital_name,
+            "Country_Name" : country_name,
+            task : task_value,
             "Prediction" : prediction,
             "Details" : details
         })
 
     df_results = pd.DataFrame(results)
-    
+    save_path = f"results/result_{task}_top{top_k}_p{proba_threshold}.csv"
+    df_results.to_csv(save_path)
+    print(f"First layer results saved at : {save_path}")
     return df_results
 
+
 def plot_stackbar_region(df_results):
+    task_name = df_results.columns[3]
 
     df_valid = df_results[df_results["Layer"] >= 0]
+    df_not_found = df_results[df_results["Layer"] == -1]
 
-    grouped = df_valid.groupby(["Layer", "Region"]).agg({
-        "Details": lambda x: "".join(x)
-    }).reset_index()
+    def prepare_group(df):
+        grouped = df.groupby(["Layer", "Region"]).agg({
+            "Details": lambda x: "".join(x)
+        }).reset_index()
 
-    # Add counts
-    counts = df_valid.groupby(["Layer", "Region"]).size().reset_index(name="Count")
+        counts = df.groupby(["Layer", "Region"]).size().reset_index(name="Count")
+        return grouped.merge(counts, on=["Layer", "Region"])
 
-    grouped = grouped.merge(counts, on=["Layer", "Region"])
+    grouped_valid = prepare_group(df_valid)
+    grouped_not_found = prepare_group(df_not_found)
 
     color_map = {
         "Europe": "blue",
@@ -242,18 +296,101 @@ def plot_stackbar_region(df_results):
         "Oceania": "purple"
     }
 
-    fig = px.bar(
-        grouped,
-        x="Layer",
-        y="Count",
-        color="Region",
-        hover_data={
-            "Details": True
-        },
-        color_discrete_map=color_map,
-        title="Capitales détectées par couche (non cumulatif) par région du monde,<br>parmis le top 10 des tokens."
+    # Create subplots
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=("", "Non trouvé(e)s"),
+        shared_yaxes=True,
+        column_widths=[0.95, 0.05]
     )
-    fig.update_layout(barmode="stack")
-    fig.update_layout(template="plotly")
-    fig.write_html("stackbar_first-layer-vizu_regions.html")
+
+    # First subplot (trouvées)
+    for region in grouped_valid["Region"].unique():
+        df_r = grouped_valid[grouped_valid["Region"] == region]
+        fig.add_trace(
+            go.Bar(
+                x=df_r["Layer"],
+                y=df_r["Count"],
+                name=region,
+                marker_color=color_map.get(region, "gray"),
+                hovertext=df_r["Details"],
+                showlegend=True
+            ),
+            row=1, col=1
+        )
+    # Second subplot (Layer = -1, non trouvées)
+    for region in grouped_not_found["Region"].unique():
+        df_r = grouped_not_found[grouped_not_found["Region"] == region]
+        fig.add_trace(
+            go.Bar(
+                x=df_r["Layer"],
+                y=df_r["Count"],
+                name=region,
+                marker_color=color_map.get(region, "gray"),
+                hovertext=df_r["Details"],
+                showlegend=False  # no duplicate legend
+            ),
+            row=1, col=2
+        )
+    fig.update_layout(
+        barmode="stack",
+        template="plotly",
+        title=f"{task_name} trouvé(e)s par couche (non cumulatif) par région du monde<br>parmis le top 10 des tokens."
+    )
+    fig.update_xaxes(title_text="Layer", row=1, col=1)
+
+    save_path = f"results/stackedbar_regions_{task_name}.html"
+    fig.write_html(save_path)
+    print(f"Saved fig at : {save_path}")
     return fig
+
+
+import argparse
+import os
+import sys
+
+VALID_TASKS = ["ISO_Code", "Dialing_Code", "Continent", "Capital"]
+VALID_MODELS = ["HuggingFaceTB/SmolLM3-3B"]
+
+def main():
+    parser = argparse.ArgumentParser(description="Process a dataframe with a given task.",
+                                      usage="python residualstream_vizualisation.py <path> <task> <model_name>")
+    parser.add_argument("path", type=str, help="Path to the dataframe file")
+    parser.add_argument("task", type=str, help='Task to perform: one of ["ISO_Code", "Dialing_Code", "Continent", "Capital"]')
+    parser.add_argument("model_name", type=str, help="Hugging face model name")
+
+    args = parser.parse_args()
+    
+    if not os.path.exists(args.path):
+        parser.print_usage()
+        print(f"Error: The path '{args.path}' does not exist.")
+        sys.exit(1)
+
+    if args.task not in VALID_TASKS:
+        parser.print_usage()
+        print(f"Error: Invalid task '{args.task}'. Must be one of {VALID_TASKS}.")
+        sys.exit(1)
+    
+    if args.model_name not in VALID_MODELS:
+        print(f"Warning: Invalid model name '{args.model_name}'. Must be one of {VALID_MODELS}.")
+        print(f"Default model used : {VALID_MODELS[0]}")
+        args.model_name = VALID_MODELS[0]
+
+    # If everything is valid
+    df_path = args.path
+    task = args.task
+    model_name = args.model_name
+
+    print(f"Path:  {args.path}")
+    print(f"Task:  {args.task}")
+    print(f"Model: {args.model_name}")
+    
+    model, tokenizer = load_model(model_name)
+
+    res = compute_stackbar_region(model, tokenizer, df_path, task)
+    plot_stackbar_region(res)
+    
+
+if __name__ == "__main__":
+    main()
