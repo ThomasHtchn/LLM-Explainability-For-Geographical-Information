@@ -1,3 +1,7 @@
 __pycache__
-results/
+results_tmp/
+cold_storage
 data/geollm
+data/cities1000.txt
+data/cities1000.zip
+data/countryInfo.txt
