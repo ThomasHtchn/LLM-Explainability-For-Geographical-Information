@@ -1,21 +1,22 @@
 """
 City & Country Mentions in Corpus Analyzer
 =====================================================
-Loads a shuffled subset of HuggingFaceFW/fineweb-edu, detects city mentions
+Loads a shuffled subset of HuggingFaceFW/fineweb, detects city mentions
 using NER, cross-references with GeoNames cities1000.txt (pop > min_pop),
-and plots occurrence counts by continent.
+and plots occurrence counts by continent / admin1 regions distribution / heat_map of countries mentions
 
 Two NER backends :
     transformers - HuggingFace pipeline on GPU/CPU
                               model: dslim/bert-large-NER  (recommended)
     spacy (default) - spaCy GPU
 
-    Download cities1000.txt and countryInfo.txt:
+    Download geonames data :
 wget https://download.geonames.org/export/dump/cities1000.zip && unzip cities1000.zip
 wget https://download.geonames.org/export/dump/countryInfo.txt
+wget https://download.geonames.org/export/dump/admin1CodesASCII.txt
 
 
-python occ_country_city.py --n_docs 20000
+python occ_country_city.py --n_docs 20000 --task [city_country / admin1 / heat_map]
 
 """
 
@@ -33,6 +34,8 @@ import torch
 from plotly.subplots import make_subplots
 from transformers import pipeline
 import time
+import numpy as np
+import math
 
 CONTINENT_COLORS = {
     "Africa":        "#E67E22",
@@ -47,9 +50,11 @@ CONTINENT_COLORS = {
 
 COUNTRY_TO_CONTINENT = {}
 COUNTRY_NAME_LOOKUP = {}
+ADMIN1_NAME_LOOKUP = {}
+COUNTRY_ISO2_TO_ISO3: dict[str, str] = {}
 
-def load_countries(contries_path: str):
-    print(f"[1/5] Loading countries from {contries_path}...")
+def load_countries(countries_path: str):
+    print(f"[1/5] Loading countries from {countries_path}...")
 
     cols = ["ISO", "ISO3", "ISO_Numeric", "fips", "Country", "Capital", "Area", "Population", 
             "Continent", "tld", "CurrencyCode", "CurrencyName", "Phone", "Postal_Code_Format", 
@@ -64,27 +69,55 @@ def load_countries(contries_path: str):
                        "an" : "Antarctica"}
 
     df = pd.read_csv(
-        contries_path, sep="\t", header=None, names=cols,
+        countries_path, sep="\t", header=None, names=cols,
         low_memory=False, encoding="utf-8", keep_default_na=False
     )
 
     for _, row in df.iterrows():
-        country_code  = str(row["ISO"])
+        country_code  = str(row["ISO"]).upper()
         if(country_code == ""):
             continue
+        iso_lower = str(row["ISO"]).lower()
+        iso3_lower = str(row["ISO3"]).lower()
+        fips = str(row["fips"].lower())
         country_name = str(row["Country"]).strip().lower()
         cc = str(row["Continent"]).strip().lower()
         continent = continent_names.get(cc, "Unknown")
 
         COUNTRY_TO_CONTINENT.update({country_code : continent})
         COUNTRY_NAME_LOOKUP.update({country_name : country_code})
+        COUNTRY_NAME_LOOKUP.update({iso_lower : country_code})
+        COUNTRY_NAME_LOOKUP.update({iso3_lower : country_code})
+        COUNTRY_NAME_LOOKUP.update({fips : country_code})
+        COUNTRY_ISO2_TO_ISO3[country_code] = str(row["ISO3"]).strip().upper()
 
 
-def load_cities(cities_path: str) -> tuple[dict, dict]:
+def load_admin1coes(admin1_path: str):
+    print(f"[1.5/5] Loading admin1codes from {admin1_path}...")
+
+    cols = [ "code", "name", "asciiname", "geonameid"]
+    
+    df = pd.read_csv(
+        admin1_path, sep="\t", header=None, names=cols,
+        low_memory=False, encoding="utf-8", keep_default_na=False
+    )
+
+    for _, row in df.iterrows():
+        country_code  = str(row["code"])[:2]
+        if(country_code == ""):
+            continue
+        name = _clean_entity(row["name"])
+        asciiname = _clean_entity(row["asciiname"])
+
+        ADMIN1_NAME_LOOKUP.update({name : country_code})
+        ADMIN1_NAME_LOOKUP.update({asciiname : country_code})
+
+
+def load_cities(cities_path: str, min_pop: int) -> tuple[dict, dict]:
     """
     Returns:
-        city_lookup  : {ascii_name_lower → set of (geonameid, country_code, population)}
-        city_meta    : {geonameid → {'name', 'country', 'continent', 'population', 'lat', 'lon'}}
+        city_lookup  : {ascii_name_lower -> set of (geonameid, country_code, population)}
+        city_meta    : {geonameid -> {'name', 'country', 'continent', 'population', 'lat', 'lon'}}
     """
     print(f"[2/5] Loading cities from {cities_path}...")
     city_lookup: dict[str, list] = defaultdict(list)
@@ -100,16 +133,31 @@ def load_cities(cities_path: str) -> tuple[dict, dict]:
         cities_path, sep="\t", header=None, names=cols,
         low_memory=False, encoding="utf-8"
     )
-    df = df[df["population"] >= 1000].copy()
+    df = df[df["population"] >= min_pop].copy()
     df["asciiname"] = df["asciiname"].fillna("").str.strip()
     df["name"]      = df["name"].fillna("").str.strip()
 
+    df["admin_level"] = np.select(
+        [
+            df["admin4"].notna(),
+            df["admin3"].notna(),
+            df["admin2"].notna(),
+            df["admin1"].notna(),
+        ],
+        [4, 3, 2, 1],
+        default=0
+    )
     # Build alternate-name variants too
     for _, row in df.iterrows():
         gid  = int(row["geonameid"])
         cc   = str(row["country_code"]).strip().upper()
         cont = COUNTRY_TO_CONTINENT.get(cc, "Unknown")
+        name = row["name"]
         pop  = int(row["population"])
+
+        # if(cont == "Unknown"):
+        #     print(f"Unkown continent : [{cc}] | [{name}]")
+        #     sys.exit("adios")
 
         city_meta[gid] = {
             "name":       row["name"],
@@ -118,36 +166,47 @@ def load_cities(cities_path: str) -> tuple[dict, dict]:
             "population": pop,
             "lat":        row["latitude"],
             "lon":        row["longitude"],
+            "admin_level": row["admin_level"]
         }
 
         # Index by ascii name and original name (lower-cased)
-        for variant in {row["asciiname"].lower(), row["name"].lower()}:
-            if len(variant) >= 2:
-                city_lookup[variant].append(gid)
+        name = _clean_entity(row["name"])
+        asciiname = _clean_entity(row["asciiname"])
+        if(name != asciiname):
+            city_lookup[asciiname].append(gid)
+        city_lookup[name].append(gid)
 
-        # Also index short alternate names (pipe-separated)
-        alts = str(row.get("alternatenames", ""))
-        for alt in alts.split(","):
-            alt = alt.strip().lower()
-            if 2 <= len(alt) <= 50 and not any(c.isdigit() for c in alt):
-                city_lookup[alt].append(gid)
+        # alts = str(row.get("alternatenames", ""))
+        # for alt in alts.split(","):
+        #     alt = _clean_entity(alt)
+        #     if 2 <= len(alt) <= 50 and not any(c.isdigit() for c in alt):
+        #         city_lookup[alt].append(gid)
 
     print(f"    {len(df):,} cities indexed ({len(city_lookup):,} name variants)")
     return dict(city_lookup), city_meta
 
 # Load dataset subet (shuffled)
-def load_corpus(n_docs: int, seed: int = 42) -> list[str]:
-    print(f"[3/5] Streaming {n_docs:,} shuffled docs from fineweb-edu...")
+def load_corpus(dataset_name: str, n_docs: int, seed: int = 42) -> list[str]:
+    print(f"[3/5] Streaming {n_docs:,} shuffled docs from {dataset_name}...")
+    # ds = load_dataset(
+    #     "HuggingFaceFW/fineweb-edu",
+    #     name="sample-10BT",
+    #     split="train",
+    #     streaming=True,
+    # )
     ds = load_dataset(
-        "HuggingFaceFW/fineweb-edu",
-        name="sample-10BT",
+        dataset_name,
         split="train",
         streaming=True,
     )
-    ds = ds.shuffle(seed=seed, buffer_size=10_000)
+    ds = ds.shuffle(seed=seed, buffer_size=100_000)
     texts = []
-    for doc in tqdm(ds, total=n_docs, unit="doc"):
-        texts.append(doc["text"])
+    pbar = tqdm(total=n_docs, unit="doc", desc="English docs")
+    for doc in ds:
+        if doc["language"] == "en":
+            texts.append(doc["text"])
+            pbar.update(1)
+
         if len(texts) >= n_docs:
             break
     print(f"    {len(texts):,} documents loaded")
@@ -191,36 +250,36 @@ def resolve_device(device_arg: str) -> tuple[str, int]:
 # ---------------------------------------------------------------------------
 def _clean_entity(text: str) -> str:
     """Normalise a raw entity string for lookup."""
-    text = re.sub(r"[''`]s?$", "", text)   # strip possessives
+    text = text.lower()
+    text = re.sub(r"[''`]s?$", "", text)   # strip possessives ('s)
+    text = text.replace("the","")
     text = text.strip(" .,;:\"'()[]")
-    return text.lower()
+    return text
 
 
 def _match_country(token: str) -> str | None:
     """Return ISO-2 country code if token is a known country name/abbrev."""
     return COUNTRY_NAME_LOOKUP.get(token)
 
+def _match_admin1(token: str) -> str | None:
+    """Return ISO-2 country code if token is a known admin1code."""
+    return ADMIN1_NAME_LOOKUP.get(token)
+
 
 def _match_city(
     token: str,
     city_lookup: dict,
     city_meta: dict,
-    min_pop: int = 0,
 ) -> int | None:
     """
     Return the best-matching city geonameid or None.
     Country names are excluded here (handled by _match_country).
     """
-    # Skip tokens that are country names — they belong to the country counter
+    # Skip tokens that are country names - they belong to the country counter
     if token in COUNTRY_NAME_LOOKUP:
         return None
 
     gids = city_lookup.get(token)
-    if not gids:
-        return None
-
-    if min_pop > 0:
-        gids = [g for g in gids if city_meta[g]["population"] >= min_pop]
     if not gids:
         return None
 
@@ -243,7 +302,7 @@ def _ner_transformers(
 ) -> Counter:
 
     device_label = f"cuda:{device_index}" if device_index >= 0 else "cpu"
-    print(f"  Loading '{model_name}' on {device_label} …")
+    print(f"  Loading '{model_name}' on {device_label}...")
 
     ner = pipeline(
         "ner",
@@ -277,15 +336,21 @@ def _ner_transformers(
             if cc:
                 country_counter[cc] += 1
                 continue
-            gid = _match_city(token, city_lookup, city_meta, min_pop)
+            cc_admin1 = _match_admin1(token)
+            if cc_admin1:
+                country_counter[cc] += 1
+                continue
+            gid = _match_city(token, city_lookup, city_meta)
             if gid:
                 city_counter[gid] += 1
+            
+
 
     return city_counter, country_counter
 
 
 # ---------------------------------------------------------------------------
-# 3d. spaCy backend  (GPU via spacy[cudaXXX] + en_core_web_trf)
+# 3d. spaCy backend
 # ---------------------------------------------------------------------------
 def _ner_spacy(
     texts: list[str],
@@ -299,12 +364,12 @@ def _ner_spacy(
     try:
         import spacy
     except ImportError:
-        print("spaCy not installed. Run: pip install spacy spacy[cuda12x]")
+        print("spaCy not installed. Run: pip install spacy")
         sys.exit(1)
 
     if device_str == "cuda":
         activated = spacy.require_gpu()
-        status = "GPU" if activated else "GPU requested but not available — using CPU"
+        status = "GPU" if activated else "GPU requested but not available - using CPU"
         print(f"  spaCy device: {status}")
     else:
         print("  spaCy device: CPU")
@@ -318,6 +383,7 @@ def _ner_spacy(
 
     city_counter: Counter = Counter()
     country_counter: Counter = Counter()
+
     for doc in tqdm(
         nlp.pipe(texts, batch_size=batch_size),
         total=len(texts),
@@ -328,16 +394,25 @@ def _ner_spacy(
             if ent.label_ not in ("GPE", "LOC"):
                 continue
             token = _clean_entity(ent.text)
+            #print(f"text {i} | text = {ent.text} | token = {token}")
             if len(token) < 2:
                 continue
             cc = _match_country(token)
             if cc:
+                #print(f"    cc = {cc}")
                 country_counter[cc] += 1
                 continue
-            gid = _match_city(token, city_lookup, city_meta, min_pop)
+            
+            cc_admin1 = _match_admin1(token)
+            if cc_admin1:
+                country_counter[cc_admin1] += 1
+                continue
+
+            gid = _match_city(token, city_lookup, city_meta)
             if gid:
                 city_counter[gid] += 1
 
+    #sys.exit("exit test")
     return city_counter, country_counter
 
 
@@ -401,6 +476,7 @@ def aggregate_and_plot(
             "population": meta["population"],
             "lat":        meta["lat"],
             "lon":        meta["lon"],
+            "admin_level": meta["admin_level"],
             "mentions":   count,
         })
     city_df = pd.DataFrame(city_rows).sort_values("mentions", ascending=False)
@@ -440,7 +516,7 @@ def aggregate_and_plot(
 
         # Country hover
         top_countries_k = country_grp.nlargest(top_hover, "mentions")
-        country_hover = [f"<b>Top {top_hover} countries</b>"]
+        country_hover = [f"<b>Top {top_hover} countries & regions (admin 1)</b>"]
         for rank, (_, r) in enumerate(top_countries_k.iterrows(), 1):
             country_hover.append(f"{rank}. {r['country_name']} - {r['mentions']:,}")
 
@@ -518,9 +594,29 @@ def aggregate_and_plot(
         ),
         row=1, col=1,
     )
+    # # World bubble map (cities only)
+    # # Color intensity scales with admin_level (0=lightest, 4=full continent color).
+    # # We blend each continent's base color toward white based on admin_level.
+    # def _blend_to_white(hex_color: str, t: float) -> str:
+    #     """t=0 -> white, t=1 -> hex_color (full intensity)."""
+    #     h = hex_color.lstrip("#")
+    #     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    #     r = int(255 + (r - 255) * t)
+    #     g = int(255 + (g - 255) * t)
+    #     b = int(255 + (b - 255) * t)
+    #     return f"#{r:02x}{g:02x}{b:02x}"
+ 
+    # # admin_level 0..4  ->  intensity 0.20..1.00 (never fully white so dots stay visible)
+    # ADMIN_INTENSITY = {0: 0.20, 1: 0.40, 2: 0.60, 3: 0.80, 4: 1.00}
 
     # World bubble map (cities only)
     for continent, grp in city_df.groupby("continent"):
+        # base_color = CONTINENT_COLORS.get(continent, "#999999")
+        # grp = grp.copy()
+        # grp["admin_level"] = grp["admin_level"].fillna(0).clip(0, 4).astype(int)
+        # grp["dot_color"] = grp["admin_level"].map(
+        #     lambda lvl: _blend_to_white(base_color, ADMIN_INTENSITY[lvl])
+        # )
         fig.add_trace(
             go.Scattergeo(
                 lat=grp["lat"],
@@ -529,7 +625,8 @@ def aggregate_and_plot(
                 marker=dict(
                     size=grp["mentions"].apply(lambda x: max(4, min(40, x**0.45))),
                     color=CONTINENT_COLORS.get(continent, "#999"),
-                    opacity=0.80,
+                    #color=grp["dot_color"].tolist(),
+                    opacity=0.90,
                     line=dict(width=0.4, color="#ffffff"),
                 ),
                 text=grp.apply(
@@ -556,9 +653,9 @@ def aggregate_and_plot(
         barmode="stack",
         title=dict(
             text=(
-                f"<b>City & Country Mentions in HuggingFaceFW/fineweb-edu ({n_docs} samples)</b><br>"
+                f"<b>City & Country / Regions Mentions in HuggingFaceFW/fineweb-edu ({n_docs} samples)</b><br>"
                 f"<sup>{total_city:,} city mentions ({n_cities:,} cities) + "
-                f"{total_country:,} ({n_countries} countries) country mentions - NER-based detection</sup>"
+                f"{total_country:,} ({n_countries} countries / regions) country / region mentions - NER-based detection</sup>"
             ),
             x=0.5, xanchor="center",
             font=dict(size=18, color="#111111"),
@@ -596,7 +693,7 @@ def aggregate_and_plot(
     fig.update_yaxes(gridcolor="#e0e0e0", zeroline=False, linecolor="#cccccc")
 
     fig.write_html(output_path)
-    print(f"\n  Plot saved to: {output_path}")
+    print(f"\n  Plot saved at: {output_path}")
 
     # Console summary
     print("\n-- Continent summary --")
@@ -608,6 +705,341 @@ def aggregate_and_plot(
         print(country_df[["country_name", "continent", "mentions"]].head(20).to_string(index=False))
 
     return city_df, country_df, cont_df
+
+
+def plot_admin1(
+    city_counter: Counter,
+    city_meta: dict,
+    output_path: str,
+):
+    print("[5/5] Aggregating and plotting...")
+
+    city_rows = []
+    for gid, count in city_counter.items():
+        meta = city_meta[gid]
+        city_rows.append({
+            "geonameid":  gid,
+            "city":       meta["name"],
+            "country":    meta["country"],
+            "continent":  meta["continent"],
+            "population": meta["population"],
+            "lat":        meta["lat"],
+            "lon":        meta["lon"],
+            "admin_level": meta["admin_level"],
+            "mentions":   count,
+        })
+    city_df = pd.DataFrame(city_rows).sort_values("mentions", ascending=False)
+
+    agg = (
+        city_df
+        .groupby(["continent", "admin_level"])["mentions"]
+        .sum()
+        .reset_index()
+    )
+
+    admin_levels = [0, 1, 2, 3, 4]
+    continents = sorted(city_df["continent"].unique())
+
+    full_index = pd.MultiIndex.from_product(
+        [continents, admin_levels],
+        names=["continent", "admin_level"]
+    )
+    agg = agg.set_index(["continent", "admin_level"]).reindex(full_index, fill_value=0).reset_index()
+
+    fig = go.Figure()
+    for level in admin_levels:
+        df_level = agg[agg["admin_level"] == level]
+
+        fig.add_bar(
+            x=df_level["continent"],
+            y=df_level["mentions"],
+            name=f"Admin {level}",
+        )
+    fig.update_layout(
+        barmode="group",  # NOT stacked
+        title="Mentions per Admin Level by Continent",
+        xaxis_title="Continent",
+        yaxis_title="Total Mentions",
+    )
+    fig.write_html(output_path)
+    
+    print(f"\n  Plot saved at: {output_path}")
+
+
+def plot_heatmap(
+    city_counter: Counter,
+    country_counter: Counter,
+    city_meta: dict,
+    n_docs: int,
+    output_path: str,
+    top_hover: int = 10,
+) -> pd.DataFrame:
+    """
+    Choropleth world heatmap: each country is shaded by its total mention score,
+    which is the sum of:
+        - all city mentions whose country_code matches
+        - all direct country / admin-1 region mentions
+ 
+    Hover tooltip shows:
+        - country name, continent, ISO-3
+        - total mentions broken down by source (city vs country/region)
+        - top-k most-mentioned cities in that country
+ 
+    Returns the per-country dataframe for further analysis.
+    """
+ 
+    city_rows = []
+    for gid, count in city_counter.items():
+        meta = city_meta[gid]
+        city_rows.append({
+            "geonameid":   gid,
+            "city":        meta["name"],
+            "country":     meta["country"],          # ISO-2
+            "continent":   meta["continent"],
+            "population":  meta["population"],
+            "admin_level": meta.get("admin_level", 0),
+            "mentions":    count,
+        })
+    city_df = pd.DataFrame(city_rows) if city_rows else pd.DataFrame(
+        columns=["geonameid", "city", "country", "continent",
+                 "population", "admin_level", "mentions"]
+    )
+ 
+    city_by_country = (
+        city_df.groupby("country")["mentions"].sum()
+        .rename("city_mentions")
+        .reset_index()
+    )
+ 
+    #  Country / admin-1 mentions per country 
+    country_rows = [
+        {"country": cc, "country_mentions": cnt}
+        for cc, cnt in country_counter.items()
+    ]
+    country_by_country = pd.DataFrame(country_rows) if country_rows else pd.DataFrame(
+        columns=["country", "country_mentions"]
+    )
+ 
+    #  Join both sources on ISO-2 code 
+    merged = pd.merge(city_by_country, country_by_country,
+                      on="country", how="outer").fillna(0)
+    merged["city_mentions"]    = merged["city_mentions"].astype(int)
+    merged["country_mentions"] = merged["country_mentions"].astype(int)
+    merged["total_mentions"]   = merged["city_mentions"] + merged["country_mentions"]
+    merged = merged[merged["total_mentions"] > 0].copy()
+ 
+    #  Attach continent & ISO-3 (needed by go.Choropleth) 
+    merged["continent"] = merged["country"].map(
+        lambda c: COUNTRY_TO_CONTINENT.get(c, "Unknown")
+    )
+    merged["iso3"] = merged["country"].map(
+        lambda c: COUNTRY_ISO2_TO_ISO3.get(c, "")
+    )
+    merged = merged[merged["iso3"] != ""].copy()   # drop unmapped codes
+ 
+    # Reverse-lookup readable country name (longest match wins)
+    iso2_to_name: dict[str, str] = {}
+    for name, code in COUNTRY_NAME_LOOKUP.items():
+        if len(name) > len(iso2_to_name.get(code, "")):
+            iso2_to_name[code] = name.title()
+    merged["country_name"] = merged["country"].map(
+        lambda c: iso2_to_name.get(c, c)
+    )
+ 
+    # Build per-country hover text
+    # Pre-compute top-k cities per country from city_df
+    top_cities_per_country: dict[str, str] = {}
+    if not city_df.empty:
+        for cc, grp in city_df.groupby("country"):
+            top_k = grp.nlargest(top_hover, "mentions")
+            lines = [f"<b>Top {top_hover} cities</b>"]
+            for rank, (_, r) in enumerate(top_k.iterrows(), 1):
+                lines.append(
+                    f"  {rank}. {r['city']}  —  {r['mentions']:,}"
+                )
+            top_cities_per_country[cc] = "<br>".join(lines)
+ 
+    def _build_hover(row: pd.Series) -> str:
+        cc = row["country"]
+        lines = [
+            f"<b>{row['country_name']}</b> ({row['iso3']})",
+            f"Continent: {row['continent']}",
+            f"Total mentions: {row['total_mentions']:,}",
+            f"  City mentions:    {row['city_mentions']:,}",
+            f"  Country/region:   {row['country_mentions']:,}",
+            "",
+        ]
+        lines.append(top_cities_per_country.get(cc, "<i>No city data</i>"))
+        return "<br>".join(lines)
+ 
+    merged["hover_text"] = merged.apply(_build_hover, axis=1)
+ 
+    # Build figure
+    # Two rows:
+    #   row 1 – choropleth world map (main heatmap)
+    #   row 2 – horizontal bar chart: top-N countries by total mentions
+    TOP_BAR = 10
+ 
+    top_bar_df = merged.nlargest(TOP_BAR, "total_mentions").sort_values("total_mentions")
+    top_bar_df["bar_color"] = top_bar_df["continent"].map(
+        lambda c: CONTINENT_COLORS.get(c, "#999999")
+    )
+ 
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=[
+            "World Heatmap — Total Mentions per Country  "
+            "(cities + countries/regions)",
+            f"Top {TOP_BAR} Countries by Total Mentions",
+        ],
+        specs=[
+            [{"type": "choropleth"}],
+            [{"type": "bar"}],
+        ],
+        vertical_spacing=0.08,
+        row_heights=[0.65, 0.35],
+    )
+ 
+    # Row 1: choropleth
+    # Custom diverging-ish sequential palette: pale yellow → orange → deep red
+    # Using a named Plotly scale keeps it perceptually uniform.
+    fig.add_trace(
+        go.Choropleth(
+            locations=merged["iso3"],
+            z=merged["total_mentions"],
+            text=merged["hover_text"],
+            hoverinfo="text",
+            colorscale="YlOrRd",
+            zmin=0,
+            #zmax=merged["total_mentions"].max(),
+            zmax = merged["total_mentions"].quantile(0.95),
+            marker_line_color="#ffffff",
+            marker_line_width=0.4,
+            colorbar=dict(
+                title=dict(
+                    text="Total mentions",
+                    side="right",
+                    font=dict(size=11),
+                ),
+                thickness=14,
+                len=0.55,
+                y=0.72,
+                tickfont=dict(size=10),
+                outlinewidth=0,
+            ),
+        ),
+        row=1, col=1,
+    )
+    # Row 2: horizontal bar - top N countries 
+    # Stacked: city mentions (solid) + country/region mentions (lighter)
+    def _lighten(hex_color: str, factor: float = 0.45) -> str:
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return "#{:02x}{:02x}{:02x}".format(
+            int(r + (255 - r) * factor),
+            int(g + (255 - g) * factor),
+            int(b + (255 - b) * factor),
+        )
+ 
+    light_bar_colors = [_lighten(c) for c in top_bar_df["bar_color"].tolist()]
+ 
+    fig.add_trace(
+        go.Bar(
+            name="City mentions",
+            x=top_bar_df["city_mentions"],
+            y=top_bar_df["country_name"],
+            orientation="h",
+            marker_color=top_bar_df["bar_color"].tolist(),
+            marker_line=dict(width=0),
+            text=top_bar_df["city_mentions"].apply(lambda x: f"{x:,}" if x > 0 else ""),
+            textposition="inside",
+            insidetextanchor="middle",
+            customdata=top_bar_df["hover_text"].tolist(),
+            hovertemplate="%{customdata}<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+    fig.add_trace(
+        go.Bar(
+            name="Country/region mentions",
+            x=top_bar_df["country_mentions"],
+            y=top_bar_df["country_name"],
+            orientation="h",
+            marker_color=light_bar_colors,
+            marker_line=dict(width=0),
+            text=top_bar_df["country_mentions"].apply(lambda x: f"{x:,}" if x > 0 else ""),
+            textposition="inside",
+            insidetextanchor="middle",
+            customdata=top_bar_df["hover_text"].tolist(),
+            hovertemplate="%{customdata}<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+    # Layout
+    total_mentions = int(merged["total_mentions"].sum())
+    n_countries    = len(merged)
+ 
+    fig.update_layout(
+        barmode="stack",
+        title=dict(
+            text=(
+                f"<b>Geographic Mention Heatmap — HuggingFaceFW/fineweb-edu"
+                f" ({n_docs:,} docs)</b><br>"
+                f"<sup>{total_mentions:,} total mentions across"
+                f" {n_countries} countries — NER-based detection</sup>"
+            ),
+            x=0.5, xanchor="center",
+            font=dict(size=17, color="#111111"),
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=1.01,
+            xanchor="center", x=0.5,
+            font=dict(size=12),
+        ),
+        height=1200,
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#f7f7f7",
+        font=dict(color="#222222", family="Inter, Arial, sans-serif"),
+        geo=dict(
+            showframe=False,
+            showcoastlines=True,
+            coastlinecolor="#cccccc",
+            showland=True,
+            landcolor="#f0f0f0",    # countries with 0 mentions stay light grey
+            showocean=True,
+            oceancolor="#dceef7",
+            showcountries=True,
+            countrycolor="#cccccc",
+            projection_type="natural earth",
+            bgcolor="#ffffff",
+        ),
+        hoverlabel=dict(
+            bgcolor="#ffffff",
+            bordercolor="#cccccc",
+            font=dict(color="#111111", size=12),
+            align="left",
+        ),
+        margin=dict(t=110, b=20, l=20, r=20),
+    )
+    fig.update_xaxes(gridcolor="#e0e0e0", zeroline=False,
+                     linecolor="#cccccc", row=2, col=1)
+    fig.update_yaxes(gridcolor="#e0e0e0", zeroline=False,
+                     linecolor="#cccccc", tickfont=dict(size=10), row=2, col=1)
+ 
+    fig.write_html(output_path)
+    print(f"\n  Heatmap saved to: {output_path}")
+ 
+    # Console summary
+    print("\n-- Top 20 countries by total mentions --")
+    print(
+        merged.nlargest(20, "total_mentions")
+              [["country_name", "continent", "city_mentions",
+                "country_mentions", "total_mentions"]]
+              .to_string(index=False)
+    )
+ 
+    return merged
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -623,6 +1055,9 @@ def parse_args():
                     help="Path to GeoNames cities1000.txt")
     p.add_argument("--n_docs",    type=int, default=5_000,
                    help="Number of documents to sample")
+    p.add_argument("--dataset", default="HuggingFaceFW/fineweb", 
+                   choices=["HuggingFaceFW/fineweb", "HuggingFaceFW/fineweb-edu"],
+                   help="Dataset from huggingface name")
     p.add_argument(
         "--ner", default="spacy", choices=["transformers", "spacy"],
         help=(
@@ -652,15 +1087,20 @@ def parse_args():
     p.add_argument("--top_hover",  type=int, default=10,
                    help="Top K cities per continent shown in continent bar hover tooltip")
     p.add_argument(
-        "--min_pop", type=int, default=50_000,
+        "--min_pop", type=int, default=1000,
         help=(
             "Minimum city population for a NER match to be counted. "
             "Raises the bar so tiny towns named 'China' or 'England' are ignored. "
             "(default: 50000)"
         ),
     )
-    p.add_argument("--output_dir",     default="results/",
+    p.add_argument("--output_dir",     default="results_tmp/occ",
                    help="Dir to output HTML file")
+    p.add_argument("--admin1", default="data/admin1CodesASCII.txt",
+                   help="Path to GeoNames admin1CodesASCII.txt")
+    p.add_argument("--task", default="city_country", choices=["city_country", "admin_level", "heat_map"],
+                   help="Task to be performe (plot)")
+
     return p.parse_args()
 
 
@@ -678,12 +1118,26 @@ def main():
         print("Download with:")
         print("  wget https://download.geonames.org/export/dump/countryInfo.txt")
         sys.exit(1)
+    
+    if not Path(args.output_dir).exists():
+        print(f"Error: The output dir path '{args.output_dir}' does not exist.")
+        sys.exit(1)
+    
+    if not Path(args.admin1).exists():
+        print(f"ERROR: admin1CodesASCII file not found: {args.admin1}")
+        print("Download with:")
+        print("  wget https://download.geonames.org/export/dump/admin1CodesASCII.txt")
+        sys.exit(1)
+
+
+    dataset_str = args.dataset.replace("/","_").lower()
 
     # Resolve device
-    print("[0/5] Resolving compute device …")
+    print("[0/5] Resolving compute device...")
     device_str, device_index = resolve_device(args.device)
 
     load_countries(args.countries)
+    load_admin1coes(args.admin1)
     
     # Default models per backend
     model_name = args.model or (
@@ -691,8 +1145,8 @@ def main():
         else "en_core_web_trf"
     )
 
-    city_lookup, city_meta = load_cities(args.cities)
-    texts                  = load_corpus(args.n_docs, seed=args.seed)
+    city_lookup, city_meta = load_cities(args.cities, args.min_pop)
+    texts                  = load_corpus(args.dataset, args.n_docs, seed=args.seed)
 
     start_time = time.time()
     city_counter, country_counter = extract_city_counts(
@@ -707,11 +1161,16 @@ def main():
     exec_time = time.time() - start_time
     print(f"Total execution time on [{args.n_docs}] docs : {int(exec_time // 60)} m, {int(exec_time % 60)} s")
 
-    output_path = f"{args.output_dir}/occ_city_country_ndocs_{args.n_docs}_min_pop_{args.min_pop}_{args.ner}.html"
-    city_df, country_df, cont_df = aggregate_and_plot(city_counter, country_counter, city_meta, args.n_docs, output_path, args.top_hover)
-    city_df.to_csv(f"{args.output_dir}/df_city.csv")
-    country_df.to_csv(f"{args.output_dir}/df_country.csv")
-    cont_df.to_csv(f"{args.output_dir}/df_cont_df.csv")
+    output_path = f"{args.output_dir}/occ_{args.task}_{dataset_str}_ndocs_{args.n_docs}_min_pop_{args.min_pop}_{args.ner}.html"
+    if args.task == "city_country":
+        city_df, country_df, cont_df = aggregate_and_plot(city_counter, country_counter, city_meta, args.n_docs, output_path, args.top_hover)
+        # city_df.to_csv(f"{args.output_dir}/df_city.csv")
+        # country_df.to_csv(f"{args.output_dir}/df_country.csv")
+        # cont_df.to_csv(f"{args.output_dir}/df_cont_df.csv")
+    elif args.task == "admin_level":
+        plot_admin1(city_counter, city_meta, output_path)
+    elif args.task == "heat_map":
+        plot_heatmap(city_counter, country_counter, city_meta, args.n_docs, output_path, args.top_hover)
 
 if __name__ == "__main__":
     main()
