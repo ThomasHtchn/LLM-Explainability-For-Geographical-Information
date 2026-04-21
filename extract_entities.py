@@ -22,6 +22,7 @@ from tqdm import tqdm
 import torch
 from transformers import pipeline
 import time
+from create_geodb import clean_entity
 
 N_STEPS = 2
 
@@ -79,16 +80,6 @@ def resolve_device(device_arg: str) -> tuple[str, int]:
     return "cpu", -1
 
 
-
-def _clean_entity(text: str) -> str:
-    text = text.lower()                     # lower case
-    text = re.sub(r"(?:'s|’s)$", "", text)  # possessive removal
-    text = re.sub(r"\bthe\b", "", text)     # remove "the" as a word only
-    text = text.strip(" .,;:\"'()[]")       # remove any leading and tailing caracters present in the ("")
-    text = re.sub(r"\s+", " ", text)        # normalize spaces
-    return text
-
-
 _HF_LOC_LABELS = {"LOC", "GPE", "FAC", "B-LOC", "I-LOC", "B-GPE", "I-GPE"}
 
 def _ner_transformers(
@@ -125,7 +116,7 @@ def _ner_transformers(
             label = ent.get("entity_group") or ent.get("entity", "")
             if label not in _HF_LOC_LABELS:
                 continue
-            token = _clean_entity(ent["word"])
+            token = clean_entity(ent["word"])
             if len(token) < 2:
                 continue
 
@@ -161,7 +152,7 @@ def _ner_spacy(
         print(f"    python -m spacy download {model_name}")
         sys.exit(1)
 
-    entity_counter: Counter = Counter()
+    results = {}
 
     for doc in tqdm(
         nlp.pipe(texts, batch_size=batch_size),
@@ -170,22 +161,21 @@ def _ner_spacy(
         desc="NER (spaCy)",
     ):
         for ent in doc.ents:
-            if ent.label_ not in ("GPE", "LOC"):
-                continue
-            token = _clean_entity(ent.text)
+            if ent.label_ in ("GPE", "LOC"):
+                key = clean_entity(ent.text)
+                #key = ent.text
+                if key not in results:
+                    results[key] = {
+                    "count": 0,
+                    "label": ent.label_
+                }
 
-            if len(token) < 2:
-                continue
+                results[key]["count"] += 1
 
-            entity_counter[token] += 1
-
-    return entity_counter
+    return results
 
 
-# ---------------------------------------------------------------------------
-# 3e. Public entry point
-# ---------------------------------------------------------------------------
-def extract_city_counts(
+def extract_entities_counts(
     texts: list[str],
     backend: str,
     model_name: str,
@@ -197,20 +187,21 @@ def extract_city_counts(
           f"device={'cpu' if device_index < 0 else f'cuda:{device_index}'}...")
 
     if backend == "transformers":
-        entity_counter = _ner_transformers(
+        results = _ner_transformers(
             texts, model_name, device_index, batch_size
         )
     elif backend == "spacy":
-        entity_counter = _ner_spacy(
+        results = _ner_spacy(
             texts, model_name, device_str, batch_size
         )
     else:
         raise ValueError(f"Unknown backend '{backend}'. Choose: transformers | spacy")
 
-    print(f"    -> {sum(entity_counter.values()):,} entity mentions across "
-          f"{len(entity_counter):,} distinct entities")
+    total_mentions = sum(data["count"] for data in results.values())
+    print(f"    -> {total_mentions:,} entity mentions across "
+          f"{len(results):,} distinct entities")
 
-    return entity_counter
+    return results
 
 
 
@@ -241,7 +232,9 @@ def parse_args():
                    help="Shuffle seed")
 
     p.add_argument("--output_dir",     default="results_tmp/",
-                   help="Dir to output HTML file")
+                   help="Dir to output pkl file")
+    p.add_argument("--output_path",     default=None,
+                   help="Path to output pkl file")
     
     return p.parse_args()
 
@@ -269,7 +262,7 @@ def main():
     texts = load_corpus(args.dataset, args.n_docs, seed=args.seed)
 
     start_time = time.time()
-    entity_counter = extract_city_counts(
+    res = extract_entities_counts(
                                  texts,
                                  backend=args.ner,
                                  model_name=model_name,
@@ -280,15 +273,15 @@ def main():
     exec_time = time.time() - start_time
     print(f"Total execution time on [{args.n_docs}] docs : {int(exec_time // 60)} m, {int(exec_time % 60)} s")
 
-    output_path = f"{args.output_dir}/geo_entity_counter_{dataset_str}_ndocs_{args.n_docs}_{args.ner}.plk"
+    if args.output_path:
+        output_path = args.output_path
+    else:
+        output_path = f"{args.output_dir}/geo_entities_{args.ner}_{dataset_str}_{args.n_docs}.pkl"
 
     # Save
     with open(output_path, "wb") as f:
-        pickle.dump(entity_counter, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    # # Load
-    # with open("geo_entity_counter.pkl", "rb") as f:
-    #     my_dict = pickle.load(f)
+        pickle.dump(res, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"Saved entities at : {output_path}")
 
 if __name__ == "__main__":
     main()
