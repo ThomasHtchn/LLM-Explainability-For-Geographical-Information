@@ -27,25 +27,35 @@ from create_geodb import clean_entity
 N_STEPS = 2
 
 # Load dataset subet (shuffled)
-def load_corpus(dataset_name: str, n_docs: int, seed: int = 42) -> list[str]:
+def load_corpus(dataset_name: str, n_docs: int, seed: int = 42):
     print(f"[1/{N_STEPS}] Streaming {n_docs:,} shuffled docs from {dataset_name}...")
+    
     ds = load_dataset(
         dataset_name,
         split="train",
         streaming=True,
     )
-    ds = ds.shuffle(seed=seed, buffer_size=n_docs*10)
-    texts = []
+    ds = ds.shuffle(buffer_size=n_docs * 10)
+
+    rows = []
     pbar = tqdm(total=n_docs, unit="doc", desc="English docs")
+
     for doc in ds:
         if doc["language"] == "en":
-            texts.append(doc["text"])
+            rows.append({
+                "text": doc["text"],
+                "token_count": doc["token_count"],
+                "score": doc["score"],
+                "int_score": doc["int_score"],
+            })
+
             pbar.update(1)
 
-        if len(texts) >= n_docs:
+        if len(rows) >= n_docs:
             break
-    print(f"    {len(texts):,} documents loaded")
-    return texts
+
+    print(f"{len(rows):,} documents loaded")
+    return rows
 
 # Device resolution
 def resolve_device(device_arg: str) -> tuple[str, int]:
@@ -127,7 +137,7 @@ def _ner_transformers(
 
 
 def _ner_spacy(
-    texts: list[str],
+    rows: list[dict],
     model_name: str,
     device_str: str,
     batch_size: int,
@@ -153,13 +163,17 @@ def _ner_spacy(
         sys.exit(1)
 
     results = {}
+    per_doc_stats = []
 
-    for doc in tqdm(
-        nlp.pipe(texts, batch_size=batch_size),
+    texts = [r["text"] for r in rows]
+
+    for doc, row in tqdm(
+        zip(nlp.pipe(texts, batch_size=batch_size), rows),
         total=len(texts),
         unit="doc",
         desc="NER (spaCy)",
     ):
+        ent_count = 0
         for ent in doc.ents:
             if ent.label_ in ("GPE", "LOC"):
                 key = clean_entity(ent.text)
@@ -171,8 +185,13 @@ def _ner_spacy(
                 }
 
                 results[key]["count"] += 1
-
-    return results
+                ent_count += 1
+        per_doc_stats.append({
+            "n_entities": ent_count,
+            "token_count": row["token_count"],
+            "score": row["score"],
+        })
+    return results, per_doc_stats
 
 
 def extract_entities_counts(
@@ -191,7 +210,7 @@ def extract_entities_counts(
             texts, model_name, device_index, batch_size
         )
     elif backend == "spacy":
-        results = _ner_spacy(
+        results, stats = _ner_spacy(
             texts, model_name, device_str, batch_size
         )
     else:
@@ -213,7 +232,7 @@ def parse_args():
 
     p.add_argument("--n_docs",    type=int, default=5_000,
                    help="Number of documents to sample")
-    p.add_argument("--dataset", default="HuggingFaceFW/fineweb", 
+    p.add_argument("--dataset", default="HuggingFaceFW/fineweb-edu", 
                    choices=["HuggingFaceFW/fineweb", "HuggingFaceFW/fineweb-edu"],
                    help="Dataset from huggingface name")
     p.add_argument("--ner", default="spacy", choices=["transformers", "spacy"],
@@ -231,7 +250,7 @@ def parse_args():
     p.add_argument("--seed",       type=int, default=42,
                    help="Shuffle seed")
 
-    p.add_argument("--output_dir",     default="results_tmp/",
+    p.add_argument("--output_dir",     default=None,
                    help="Dir to output pkl file")
     p.add_argument("--output_path",     default=None,
                    help="Path to output pkl file")
@@ -242,7 +261,7 @@ def parse_args():
 def main():
     args = parse_args()
     
-    if not Path(args.output_dir).exists():
+    if args.output_dir and not Path(args.output_dir).exists():
         print(f"Error: The output dir path '{args.output_dir}' does not exist.")
         sys.exit(1)
 

@@ -7,7 +7,6 @@ import argparse
 import sys
 from tqdm import tqdm
 import pandas as pd
-import csv
 from create_geodb import clean_entity, db_lookup
 
 
