@@ -6,3 +6,6 @@ data/cities1000.txt
 data/cities1000.zip
 data/countryInfo.txt
 data
+allCountries.txt
+geonames.db
+geo_cache.pkl
