@@ -2,11 +2,11 @@ import argparse
 import numpy as np
 import rasterio
 from rasterio.transform import rowcol
-from geollm_scripts.generate_geollm_prompts_with_csv import get_prompts
-from geollm_scripts.select_visualization_prompts import select_spread_out_points_with_importance_sampling
+from generate_geollm_prompts_with_csv import get_prompts
+from select_visualization_prompts import select_spread_out_points_with_importance_sampling
 
 def generate_prompts(bbox, num_prompts, output_file):
-    with rasterio.open('data/ppp_2020_1km_Aggregated.tif') as src:
+    with rasterio.open('data/geollm/ppp_2020_1km_Aggregated.tif') as src:
         data = src.read(1)
         transform = src.transform
         
@@ -30,6 +30,7 @@ def generate_prompts(bbox, num_prompts, output_file):
     selected_indices = select_spread_out_points_with_importance_sampling(valid_coords, populations, num_prompts)
     valid_coords = [valid_coords[i] for i in selected_indices]
     
+    print(f" len valid_coords : {len(valid_coords)}")
     get_prompts(valid_coords, output_file)
 
 if __name__ == "__main__":

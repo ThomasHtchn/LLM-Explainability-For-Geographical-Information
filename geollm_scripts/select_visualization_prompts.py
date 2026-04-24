@@ -1,5 +1,6 @@
 import argparse
-from geoollm_scripts.geollm_utils import *
+#from geollm_scripts.geollm_utils import *
+from geollm_utils import *
 from itertools import combinations
 import math
 import random

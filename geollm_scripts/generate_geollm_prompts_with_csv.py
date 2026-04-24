@@ -63,7 +63,12 @@ def get_nearby_places(lat, lon):
 def get_address(lat, lon):
     nominatim_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
 
-    response = requests.get(nominatim_url)
+    headers = {
+    "User-Agent": "generate_geollm_prompts_with_csv.py (thomas.hitchon@inrae.fr)"
+    }
+    response = requests.get(nominatim_url, headers=headers)
+    #print(f"response : {response}")
+
     data = json.loads(response.text)
 
     if 'error' in data:
@@ -78,6 +83,7 @@ def get_address(lat, lon):
         formatted_address.append(address[key])
 
     return ', '.join(formatted_address)
+
 
 def get_prompt(lat, lon):
     coordinates = f"({lat:.5f}, {lon:.5f})"

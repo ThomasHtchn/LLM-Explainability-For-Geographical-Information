@@ -3,6 +3,7 @@ import pandas as pd
 #from geollm_scripts.geollm_utils import *
 from geollm_utils import *
 from scipy.stats import spearmanr
+import os
 
 def calculate_spearman_correlation(coordinates, predictions, groundtruth_tif):
     groundtruth = [extract_data(lat, lon, groundtruth_tif) for lat, lon in coordinates]
@@ -21,26 +22,125 @@ def print_spearman_correl(predictions_csv, groundtruth_tif):
 
     print(f"Spearman correlation: {corr:.2f}")
 
+
+def compute_spearman_from_tif(
+    layers_output_dir,
+    groundtruth_tif,
+    start_layer=26,
+    end_layer=36,
+    file_prefix="layer"
+):
+    results = []
+
+    for layer_idx in range(start_layer, end_layer + 1):
+        filepath = os.path.join(layers_output_dir, f"{file_prefix}_{layer_idx}.csv")
+
+        if not os.path.exists(filepath):
+            print(f"Missing {filepath}, skipping")
+            continue
+
+        df = pd.read_csv(filepath)
+
+        preds = []
+        gts = []
+
+        for _, row in df.iterrows():
+            lat = row["latitude"]
+            lon = row["longitude"]
+            pred = row["predicted_digit"]
+
+            if pd.isna(pred):
+                continue
+
+            try:
+                pred_val = float(pred)
+                gt_val = extract_data(lat, lon, groundtruth_tif)
+            except:
+                continue
+
+            if gt_val is None:
+                continue
+
+            preds.append(pred_val)
+            gts.append(gt_val)
+
+        if len(preds) < 2:
+            corr = None
+        else:
+            corr, _ = spearmanr(preds, gts)
+
+        results.append({
+            "layer": layer_idx,
+            "spearman": corr,
+            "n_samples": len(preds)
+        })
+
+        print(f"Layer {layer_idx}: Spearman = {corr:3f}, N = {len(preds)}")
+
+    return pd.DataFrame(results)
+
+import plotly.graph_objects as go
+
+def plot_spearman_plotly(df_results):
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=df_results["layer"],
+        y=df_results["spearman"],
+        mode="lines+markers+text",
+        text=[f"{v:.3f}" for v in df_results["spearman"]],
+        textposition="top center"
+    ))
+
+    fig.update_layout(
+        title="Spearman Correlation Across Layers",
+        xaxis_title="Layer",
+        yaxis_title="Spearman Correlation",
+        yaxis=dict(range=[df_results["spearman"].min(), 1]),
+    )
+    best_idx = df_results["spearman"].idxmax()
+    best_layer = df_results.loc[best_idx, "layer"]
+    best_value = df_results.loc[best_idx, "spearman"]
+
+    fig.add_vline(x=best_layer, line_dash="dash")
+
+    fig.write_html("spearman_plot.html")
+    print("Plot saved !")
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate predictions")
-    parser.add_argument("predictions_csv", type=str, help="Path to the CSV file containing coordinates.")
+    parser.add_argument("pred_file", type=str, help="Path to the CSV file containing coordinates.")
     parser.add_argument("groundtruth_tif", type=str, help="Path to the groundtruth tif file.")
+    parser.add_argument("dir", type=str, default=None, help="Multiple files ")
 
     args = parser.parse_args()
 
-    predictions_csv = args.predictions_csv
+    pred_file = args.pred_file
     groundtruth_tif = args.groundtruth_tif
+    dir = args.dir
 
-    df = pd.read_csv(predictions_csv)
-    if 'Latitude' in df.columns and 'Longitude' in df.columns and 'Predictions' in df.columns:
-        coordinates = list(zip(df['Latitude'], df['Longitude']))
-        predictions = df['Predictions']
+    if dir:
+        df_results = compute_spearman_from_tif(
+            layers_output_dir=pred_file,
+            groundtruth_tif=groundtruth_tif,
+            start_layer=26,
+            end_layer=36
+        )
+
+        print(df_results)
+        plot_spearman_plotly(df_results)
+
     else:
-        raise ValueError("CSV file must contain 'Latitude', 'Longitude', and 'Predictions' columns.")
+        df = pd.read_csv(pred_file)
+        if 'Latitude' in df.columns and 'Longitude' in df.columns and 'Predictions' in df.columns:
+            coordinates = list(zip(df['Latitude'], df['Longitude']))
+            predictions = df['Predictions']
+        else:
+            raise ValueError("CSV file must contain 'Latitude', 'Longitude', and 'Predictions' columns.")
 
-    corr = calculate_spearman_correlation(coordinates, predictions, groundtruth_tif)
+        corr = calculate_spearman_correlation(coordinates, predictions, groundtruth_tif)
 
-    print(f"Spearman correlation: {corr:.2f}")
+        print(f"Spearman correlation: {corr:.2f}")
 
 if __name__ == "__main__":
     main()

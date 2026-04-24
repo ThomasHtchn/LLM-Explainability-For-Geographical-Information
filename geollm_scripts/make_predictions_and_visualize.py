@@ -1,5 +1,5 @@
 import argparse
-from geollm_scripts.geollm_utils import *
+from geollm_utils import *
 import os
 import json
 import numpy as np

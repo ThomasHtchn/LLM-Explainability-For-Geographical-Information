@@ -1,5 +1,9 @@
 import rasterio
 import jsonlines
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import pandas as pd
+import torch
+import re
 
 PREFIX = """You will be given data about a specific location randomly sampled from all human-populated locations on Earth.
 You give your rating keeping in mind that it is relative to all other human-populated locations on Earth (from all continents, countries, etc.).
@@ -11,7 +15,7 @@ ADJACENT_PIXELS = 12
 def load_geollm_prompts(file_path, task):
     with jsonlines.open(file_path, 'r') as reader:
         data = list(reader)
-    geollm_prompts = [PREFIX + item['text'].strip().replace("<TASK>", task) for item in data]
+    geollm_prompts = [PREFIX + item['text'].strip().replace("<TASK>", task) + " " for item in data]
     return geollm_prompts
 
 def get_coordinates(text):
@@ -47,3 +51,26 @@ def extract_data(lat, lon, file_path):
         total_population = non_negative_data.sum()
 
         return total_population if 0 <= px < src.width and 0 <= py < src.height else None
+
+def load_local_model(model_name, dtype=torch.bfloat16, device="cuda"):
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        dtype=dtype 
+    ).to(device)
+    return model, tokenizer
+
+def write_to_csv(latitudes, longitudes, predictions, file_path):
+    df = pd.DataFrame({
+        'Latitude': latitudes,
+        'Longitude': longitudes,
+        'Predictions': predictions
+    })
+    df.to_csv(file_path, index=False)
+
+def get_rating(completion):
+    match = re.search(r"(\d+\.\d+)", completion)
+    if not match:
+        return None
+    rating = float(match.group(0))
+    return rating
