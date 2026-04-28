@@ -34,6 +34,9 @@ python geocode_entities.py
 ```
 + Create worldmap visualisation of geocoded entities :
 ```
+wget https://download.geonames.org/export/dump/countryInfo.txt
+```
+```
 python vizualise_geocoding.py
     --input_path <geocoded_entities.csv>
     --n_docs <Number of geocoded docs>
@@ -73,8 +76,11 @@ python geollm_probing.py
 ```
 + Compute `Spearman correlation` between ground truth and layers predictions
 ```
+wget https://github.com/rohinmanvi/GeoLLM/blob/main/data/ppp_2020_1km_Aggregated.tif
+```
+```
 python calculate_spearman_correlation.py
-    --groundtruth_tif <data/ppp_2020_1km_Aggregated.tif>
+    --groundtruth_tif <ppp_2020_1km_Aggregated.tif>
     --dir <layers_output>
 ```
 [<img src="results/probing/spearman_layers_plot.png">](https://thomashtchn.github.io//LLM-Explainability-For-Geographical-Information/results/probing/spearman_plot.html)
