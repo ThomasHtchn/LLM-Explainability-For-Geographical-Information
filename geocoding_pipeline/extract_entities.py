@@ -22,7 +22,7 @@ from tqdm import tqdm
 import torch
 from transformers import pipeline
 import time
-from create_geodb import clean_entity
+from geocoding_pipeline.create_geodb import clean_entity
 
 N_STEPS = 2
 
@@ -43,10 +43,12 @@ def load_corpus(dataset_name: str, n_docs: int, seed: int = 42):
     for doc in ds:
         if doc["language"] == "en":
             rows.append({
+                "id": doc["id"],
                 "text": doc["text"],
                 "token_count": doc["token_count"],
                 "score": doc["score"],
                 "int_score": doc["int_score"],
+                "url": doc["url"],
             })
 
             pbar.update(1)
@@ -190,6 +192,9 @@ def _ner_spacy(
             "n_entities": ent_count,
             "token_count": row["token_count"],
             "score": row["score"],
+            "text" : row["text"],
+            "url" : row["url"],
+            "id" : row["id"] 
         })
     return results, per_doc_stats
 

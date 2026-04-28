@@ -50,6 +50,7 @@ def get_hidden_states(model, tokenizer, inputs):
     model_outputs = model.generate(**inputs, 
                                    return_dict_in_generate=True, 
                                    output_hidden_states=True,
+                                   do_sample=False,
                                    max_new_tokens=5) 
     
     generated_ids = model_outputs.sequences[0][len(inputs.input_ids[0]) :]
