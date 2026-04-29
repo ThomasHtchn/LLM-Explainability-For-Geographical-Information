@@ -48,10 +48,10 @@ def analyze_geollm_first_token(
     tokenizer,
     task,
     output_dir,
-    start_layer=26,
-    end_layer=36,
-    top_k=50,
-    output_prefix="layer",
+    start_layer,
+    end_layer,
+    top_k,
+    output_prefix,
 ):
     prompts = load_geollm_prompts(prompts_path, task)
 
@@ -107,7 +107,7 @@ def analyze_geollm_first_token(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="GeoLLM Probing",
+        description="LLM hidden layers Probing using GeoLLM benchmark",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--prompts_path",
@@ -116,6 +116,10 @@ def parse_args():
                 help="GeoLLM task")
     p.add_argument("--model",    default="HuggingFaceTB/SmolLM3-3B",
             help="LLM model from huggingface used for probing")
+    p.add_argument("--start_layer", default=1,
+                help="starting layer")
+    p.add_argument("--top_k", default=10,
+                help="")
     p.add_argument("--output_dir", default="layers_output",
                    help="Path to the dir to save per layer predictions")
     return p.parse_args()
@@ -126,16 +130,19 @@ def main():
 
     model, tokenizer = load_local_model(args.model)
 
+    END_LAYER = 36
+    OUTPUT_PREFIX = "layer"
+
     analyze_geollm_first_token(
         args.prompts_path,
         model,
         tokenizer,
         args.task,
         args.output_dir,
-        start_layer=26,
-        end_layer=36,
-        top_k=10,
-        output_prefix="layer",
+        start_layer=args.start_layer,
+        end_layer=END_LAYER,
+        top_k=args.top_k,
+        output_prefix=OUTPUT_PREFIX,
     )
 
 if __name__ == "__main__":

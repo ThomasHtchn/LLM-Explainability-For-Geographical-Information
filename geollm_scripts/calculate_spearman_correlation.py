@@ -23,12 +23,13 @@ def print_spearman_correl(predictions_csv, groundtruth_tif):
     print(f"Spearman correlation: {corr:.2f}")
 
 
-def compute_spearman_from_tif(
+def multiple_layer_spearman(
     layers_output_dir,
     groundtruth_tif,
-    start_layer=26,
-    end_layer=36,
-    file_prefix="layer"
+    start_layer,
+    end_layer,
+    file_prefix,
+    min_n
 ):
     results = []
 
@@ -64,7 +65,7 @@ def compute_spearman_from_tif(
             preds.append(pred_val)
             gts.append(gt_val)
 
-        if len(preds) < 2:
+        if len(preds) < min_n:
             corr = None
         else:
             corr, _ = spearmanr(preds, gts)
@@ -74,9 +75,10 @@ def compute_spearman_from_tif(
             "spearman": corr,
             "n_samples": len(preds)
         })
-
-        print(f"Layer {layer_idx}: Spearman = {corr:3f}, N = {len(preds)}")
-
+        if corr:
+            print(f"Layer {layer_idx}: Spearman = {corr:3f}, N = {len(preds)}")
+        else :
+            print(f"Layer {layer_idx}, N = {len(preds)}, corr = None")
     return pd.DataFrame(results)
 
 import plotly.graph_objects as go
@@ -109,28 +111,35 @@ def plot_spearman_plotly(df_results):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate predictions")
-    parser.add_argument("pred_file", type=str, help="Path to the CSV file containing coordinates.")
-    parser.add_argument("groundtruth_tif", type=str, help="Path to the groundtruth tif file.")
-    parser.add_argument("dir", type=str, default=None, help="Multiple files ")
+    parser.add_argument("--pred_file", type=str, default=None, help="Path to the CSV file containing coordinates.")
+    parser.add_argument("--tif", type=str, help="Path to the groundtruth tif file.")
+    parser.add_argument("--dir", type=str, default=None, help="Multiple files ")
+    parser.add_argument("--start_layer", type=int, default=1, help="Start layer")
+    parser.add_argument("--prefix", type=str, default="layer", help="Start layer")
+    parser.add_argument("--N", type=int, help="Number of prompts")
 
     args = parser.parse_args()
 
     pred_file = args.pred_file
-    groundtruth_tif = args.groundtruth_tif
+    groundtruth_tif = args.tif
     dir = args.dir
+    N = args.N
+    MIN_N = N * 0.9
 
     if dir:
-        df_results = compute_spearman_from_tif(
-            layers_output_dir=pred_file,
+        df_results = multiple_layer_spearman(
+            layers_output_dir=dir,
             groundtruth_tif=groundtruth_tif,
-            start_layer=26,
-            end_layer=36
+            start_layer=args.start_layer,
+            end_layer=36,
+            file_prefix=args.prefix,
+            min_n = MIN_N
         )
 
         print(df_results)
         plot_spearman_plotly(df_results)
 
-    else:
+    elif pred_file:
         df = pd.read_csv(pred_file)
         if 'Latitude' in df.columns and 'Longitude' in df.columns and 'Predictions' in df.columns:
             coordinates = list(zip(df['Latitude'], df['Longitude']))
