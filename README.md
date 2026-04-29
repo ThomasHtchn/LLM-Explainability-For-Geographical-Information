@@ -50,6 +50,11 @@ python vizualise_geocoding.py
 ## Probing
 The probing experiences we run aim to identify SmolLM3-3B's geographically rich layers.
 
++ Setup the environment
+```
+conda env create -f env.yaml -n smollm || conda env update --prune -f env.yaml -n smollm
+```
+
 + By countries, with capitals name
 
 We try to find the capital in the residual stream of the LLM by using the decoding head (the last layer) of the model on the intermediate representations (hidden states). We use prompts such as `The <task> of <country name> is ` to probe the model and we compare the top 10 tokens from each layers to the first token of the tokenized capital.

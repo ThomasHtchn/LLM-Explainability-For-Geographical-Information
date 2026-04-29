@@ -2,7 +2,7 @@
 set -e
 
 ENV_NAME="smollm"
-YAML_FILE="envgit st.yaml"
+YAML_FILE="../env.yaml"
 
 echo "Creating/updating env..."
 conda env create -f ${YAML_FILE} -n ${ENV_NAME} || conda env update -f ${YAML_FILE}
