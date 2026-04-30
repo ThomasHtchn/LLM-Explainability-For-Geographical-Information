@@ -24,6 +24,16 @@ python extract_entities.py
     --dataset <HuggingFaceFW/fineweb-edu>
     --output_path <entities_output.pkl>
 ```
++ Extract entities from `fineweb-edu` using parallisation on same or mutli GPU :
+```
+python parallel_extract_entities.py
+    --n_docs <n_docs>
+    --n_workers <number of parallel spacy NER instance running>
+```
+`3 workers, 60 000 docs total (20 000 each) :`
+```
+python run_parallel_ner.py --n_docs 60000 --n_workers 3
+```
 + Only geocode the entities from `entities_output.pkl` :
 ```
 python geocode_entities.py
@@ -52,7 +62,7 @@ The probing experiences we run aim to identify SmolLM3-3B's geographically rich 
 
 + Setup the environment
 ```
-conda env create -f env.yaml -n smollm || conda env update --prune -f env.yaml -n smollm
+conda env create -f env.yaml -n xai_env || conda env update --prune -f env.yaml -n xai_env
 ```
 
 + By countries, with capitals name

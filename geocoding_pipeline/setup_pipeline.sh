@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-ENV_NAME="smollm"
+ENV_NAME="xai_env"
 YAML_FILE="../env.yaml"
 
 echo "Creating/updating env..."
