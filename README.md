@@ -73,7 +73,16 @@ We try to find the capital in the residual stream of the LLM by using the decodi
 
 + Probing with different tasks : `ISO_Code`, `Dialing_Code`, `Continent`, `Capital`
 ```
-python residualstream_vizualisation.py <data/countries.csv> <task> <HuggingFaceTB/SmolLM3-3B>
+python residualstream_vizualisation.py
+    --path <path to countries.csv>
+    --task <name of the task>
+    --model_name <Hugging face model name>
+    --top_k <top k token to look at (default = 10)>
+    --min_prob <min proba of top k tokens (default = 0.01)>
+```
+Usage exemple : 
+```
+python residualstream_vizualisation.py --path data/countries.csv --task Capital --model_name HuggingFaceTB/SmolLM3-3B 
 ```
 <br>
 

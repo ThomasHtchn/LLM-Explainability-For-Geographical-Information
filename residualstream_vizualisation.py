@@ -230,7 +230,7 @@ def generate_hidden_states_multitask(model, tokenizer, task, country_name):
     return model_inputs, model_outputs.hidden_states[0], prediction
 
 
-def compute_stackbar_region(model, tokenizer, df_path, task, top_k=10, proba_threshold=0.01):
+def compute_stackbar_region(model, tokenizer, df_path, task, top_k, proba_threshold, tail_save_path):
     df = pd.read_csv(df_path)
     results = []
     task_with_space = task.replace("_", " ")
@@ -263,13 +263,13 @@ def compute_stackbar_region(model, tokenizer, df_path, task, top_k=10, proba_thr
         })
 
     df_results = pd.DataFrame(results)
-    save_path = f"results/result_{task}_top{top_k}_p{proba_threshold}.csv"
+    save_path = f"results/result_{tail_save_path}.csv"
     df_results.to_csv(save_path)
     print(f"First layer results saved at : {save_path}")
     return df_results
 
 
-def plot_stackbar_region(df_results):
+def plot_stackbar_region(df_results, tail_save_path):
     task_name = df_results.columns[3]
 
     df_valid = df_results[df_results["Layer"] >= 0]
@@ -340,7 +340,7 @@ def plot_stackbar_region(df_results):
     )
     fig.update_xaxes(title_text="Layer", row=1, col=1)
 
-    save_path = f"results/stackedbar_regions_{task_name}.html"
+    save_path = f"results/stackedbar_{tail_save_path}.html"
     fig.write_html(save_path)
     print(f"Saved fig at : {save_path}")
     return fig
@@ -356,9 +356,11 @@ VALID_MODELS = ["HuggingFaceTB/SmolLM3-3B"]
 def main():
     parser = argparse.ArgumentParser(description="Process a dataframe with a given task.",
                                       usage="python residualstream_vizualisation.py <path> <task> <model_name>")
-    parser.add_argument("path", type=str, help="Path to the dataframe file")
-    parser.add_argument("task", type=str, help='Task to perform: one of ["ISO_Code", "Dialing_Code", "Continent", "Capital"]')
-    parser.add_argument("model_name", type=str, help="Hugging face model name")
+    parser.add_argument("--path", type=str, help="Path to the dataframe file")
+    parser.add_argument("--task", type=str, help='Task to perform: one of ["ISO_Code", "Dialing_Code", "Continent", "Capital"]')
+    parser.add_argument("--model_name", type=str, help="Hugging face model name")
+    parser.add_argument("--top_k", type=int, default=10, help="Top k token to look at in the residual-stream")
+    parser.add_argument("--min_prob", type=float, default=0.01, help="Top k token to look at in the residual-stream")
 
     args = parser.parse_args()
     
@@ -381,15 +383,20 @@ def main():
     df_path = args.path
     task = args.task
     model_name = args.model_name
+    top_k = args.top_k
+    min_prob = args.min_prob
+    model_str = args.model_name.replace("/","_").lower()
 
+    save_path_tail = f"{model_str}_{task.lower()}_top{top_k}_p{str(min_prob).replace('.','')}"
+    
     print(f"Path:  {args.path}")
     print(f"Task:  {args.task}")
     print(f"Model: {args.model_name}")
     
     model, tokenizer = load_model(model_name)
 
-    res = compute_stackbar_region(model, tokenizer, df_path, task)
-    plot_stackbar_region(res)
+    res = compute_stackbar_region(model, tokenizer, df_path, task, top_k=top_k, proba_threshold=min_prob, tail_save_path=save_path_tail)
+    plot_stackbar_region(res, save_path_tail)
     
 
 if __name__ == "__main__":
