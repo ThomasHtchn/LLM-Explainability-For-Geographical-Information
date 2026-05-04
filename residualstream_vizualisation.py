@@ -360,7 +360,7 @@ def main():
     parser.add_argument("--task", type=str, help='Task to perform: one of ["ISO_Code", "Dialing_Code", "Continent", "Capital"]')
     parser.add_argument("--model_name", type=str, help="Hugging face model name")
     parser.add_argument("--top_k", type=int, default=10, help="Top k token to look at in the residual-stream")
-    parser.add_argument("--min_prob", type=float, default=0.01, help="Top k token to look at in the residual-stream")
+    parser.add_argument("--min_prob", type=float, default=0.01, help="Minimum probability threshold for tokens of the residual-stream")
 
     args = parser.parse_args()
     
