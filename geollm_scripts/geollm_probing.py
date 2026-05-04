@@ -115,13 +115,17 @@ def parse_args():
     p.add_argument("--task",    default="Population Density",
                 help="GeoLLM task")
     p.add_argument("--model",    default="HuggingFaceTB/SmolLM3-3B",
-            help="LLM model from huggingface used for probing")
-    p.add_argument("--start_layer", default=1,
+                help="LLM model from huggingface used for probing")
+    p.add_argument("--start_layer", type=int, default=1,
                 help="starting layer")
+    p.add_argument("--end_layer", type=int, default=36,
+                help="end layer")
     p.add_argument("--top_k", default=10,
-                help="")
+                help="Top k to look at")
+    p.add_argument("--output_prefix", default="layer",
+                help="Prefix of the per layer result files")
     p.add_argument("--output_dir", default="layers_output",
-                   help="Path to the dir to save per layer predictions")
+                help="Path to the dir to save per layer predictions")
     return p.parse_args()
 
 
@@ -130,9 +134,6 @@ def main():
 
     model, tokenizer = load_local_model(args.model)
 
-    END_LAYER = 36
-    OUTPUT_PREFIX = "layer"
-
     analyze_geollm_first_token(
         args.prompts_path,
         model,
@@ -140,9 +141,9 @@ def main():
         args.task,
         args.output_dir,
         start_layer=args.start_layer,
-        end_layer=END_LAYER,
+        end_layer=args.end_layer,
         top_k=args.top_k,
-        output_prefix=OUTPUT_PREFIX,
+        output_prefix=args.output_prefix,
     )
 
 if __name__ == "__main__":

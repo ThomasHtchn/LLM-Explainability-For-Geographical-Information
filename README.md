@@ -96,16 +96,19 @@ python geollm_probing.py
     --prompts_path <jsonl prompts file>
     --task <Population Density>
     --model <HuggingFaceTB/SmolLM3-3B>
+    --end_layer <Number of layers of the model>
     --output_dir <layers_output>
 ```
 + Compute `Spearman correlation` between ground truth and layers predictions
 ```
-wget https://github.com/rohinmanvi/GeoLLM/blob/main/data/ppp_2020_1km_Aggregated.tif
+wget https://github.com/rohinmanvi/GeoLLM/raw/e5bdd45a7c63f8579ce8d6943a7a3e225e9ef937/data/ppp_2020_1km_Aggregated.tif?download=
 ```
 ```
 python calculate_spearman_correlation.py
     --groundtruth_tif <ppp_2020_1km_Aggregated.tif>
-    --dir <layers_output>
+    --intput_dir <layers_output>
+    --end_layer <Number of layers of the model>
+    --N <Number of prompts used>
 ```
 [<img src="results/probing/spearman_layers_plot.png">](https://thomashtchn.github.io//LLM-Explainability-For-Geographical-Information/results/probing/spearman_plot.html)
 

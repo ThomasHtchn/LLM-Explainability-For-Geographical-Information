@@ -113,16 +113,17 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate predictions")
     parser.add_argument("--pred_file", type=str, default=None, help="Path to the CSV file containing coordinates.")
     parser.add_argument("--tif", type=str, help="Path to the groundtruth tif file.")
-    parser.add_argument("--dir", type=str, default=None, help="Multiple files ")
+    parser.add_argument("--input_dir", type=str, default=None, help="Multiple files ")
     parser.add_argument("--start_layer", type=int, default=1, help="Start layer")
-    parser.add_argument("--prefix", type=str, default="layer", help="Start layer")
+    parser.add_argument("--end_layer", type=int, default=36, help="End layer")
+    parser.add_argument("--prefix", type=str, default="layer", help="Prefix of the per layer result files")
     parser.add_argument("--N", type=int, help="Number of prompts")
 
     args = parser.parse_args()
 
     pred_file = args.pred_file
     groundtruth_tif = args.tif
-    dir = args.dir
+    dir = args.input_dir
     N = args.N
     MIN_N = N * 0.9
 
@@ -131,7 +132,7 @@ def main():
             layers_output_dir=dir,
             groundtruth_tif=groundtruth_tif,
             start_layer=args.start_layer,
-            end_layer=36,
+            end_layer=args.end_layer,
             file_prefix=args.prefix,
             min_n = MIN_N
         )
