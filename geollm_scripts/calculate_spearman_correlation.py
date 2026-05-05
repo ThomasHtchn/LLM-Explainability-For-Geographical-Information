@@ -123,7 +123,6 @@ def main():
     parser.add_argument("--prefix", type=str, default="layer", help="Prefix of the per layer result files")
     parser.add_argument("--N", type=int, help="Number of prompts")
     parser.add_argument("--model_name", type=str, help="Hugging face model name")
-    parser.add_argument("--end_layer", default="28", help="number of layers")
 
     args = parser.parse_args()
 
