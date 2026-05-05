@@ -21,10 +21,18 @@ def generate_country_capital_prompts(file_name):
 @st.cache_resource
 def load_model(model_name="HuggingFaceTB/SmolLM3-3B", device="cuda", type=torch.bfloat16):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        dtype=type
-    ).to(device)
+    if "mistralai" in model_name:
+        from transformers import Mistral3ForConditionalGeneration, MistralCommonBackend, FineGrainedFP8Config
+        model = Mistral3ForConditionalGeneration.from_pretrained(
+            model_name,
+            device_map=device,
+            dtype=type,
+        ) 
+    else :
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            dtype=type,
+        ).to(device)
     return model, tokenizer
 
 # Tokenize prompt to infer on

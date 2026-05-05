@@ -34,6 +34,7 @@ def multiple_layer_spearman(
     results = []
 
     for layer_idx in range(start_layer, end_layer + 1):
+        # print(f'layers_output_dir, f"{file_prefix}_{layer_idx}.csv"')
         filepath = os.path.join(layers_output_dir, f"{file_prefix}_{layer_idx}.csv")
 
         if not os.path.exists(filepath):
@@ -56,7 +57,10 @@ def multiple_layer_spearman(
             try:
                 pred_val = float(pred)
                 gt_val = extract_data(lat, lon, groundtruth_tif)
-            except:
+            except Exception as e:
+                print(e)
+                print(f"pred_val: {pred_val}, lat: {lat}")
+                system.exit(1)
                 continue
 
             if gt_val is None:
@@ -83,7 +87,7 @@ def multiple_layer_spearman(
 
 import plotly.graph_objects as go
 
-def plot_spearman_plotly(df_results):
+def plot_spearman_plotly(df_results, model_str):
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -106,7 +110,7 @@ def plot_spearman_plotly(df_results):
 
     fig.add_vline(x=best_layer, line_dash="dash")
 
-    fig.write_html("spearman_plot.html")
+    fig.write_html(f"spearman_plot_{model_str}.html")
     print("Plot saved !")
 
 def main():
@@ -118,8 +122,12 @@ def main():
     parser.add_argument("--end_layer", type=int, default=36, help="End layer")
     parser.add_argument("--prefix", type=str, default="layer", help="Prefix of the per layer result files")
     parser.add_argument("--N", type=int, help="Number of prompts")
+    parser.add_argument("--model_name", type=str, help="Hugging face model name")
+    parser.add_argument("--end_layer", default="28", help="number of layers")
 
     args = parser.parse_args()
+
+    model_str = args.model_name.replace("/","_").lower()
 
     pred_file = args.pred_file
     groundtruth_tif = args.tif
@@ -132,13 +140,13 @@ def main():
             layers_output_dir=dir,
             groundtruth_tif=groundtruth_tif,
             start_layer=args.start_layer,
-            end_layer=args.end_layer,
+            end_layer=int(args.end_layer),
             file_prefix=args.prefix,
             min_n = MIN_N
         )
 
         print(df_results)
-        plot_spearman_plotly(df_results)
+        plot_spearman_plotly(df_results, model_str)
 
     elif pred_file:
         df = pd.read_csv(pred_file)

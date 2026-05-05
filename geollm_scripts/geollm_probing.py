@@ -125,7 +125,9 @@ def parse_args():
     p.add_argument("--output_prefix", default="layer",
                 help="Prefix of the per layer result files")
     p.add_argument("--output_dir", default="layers_output",
-                help="Path to the dir to save per layer predictions")
+                   help="Path to the dir to save per layer predictions")
+    p.add_argument("--end_layer", default="28",
+                   help="number of layers")
     return p.parse_args()
 
 
@@ -134,6 +136,8 @@ def main():
 
     model, tokenizer = load_local_model(args.model)
 
+    OUTPUT_PREFIX = "layer"
+
     analyze_geollm_first_token(
         args.prompts_path,
         model,
@@ -141,7 +145,7 @@ def main():
         args.task,
         args.output_dir,
         start_layer=args.start_layer,
-        end_layer=args.end_layer,
+        end_layer=int(args.end_layer),
         top_k=args.top_k,
         output_prefix=args.output_prefix,
     )

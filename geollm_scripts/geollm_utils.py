@@ -54,10 +54,18 @@ def extract_data(lat, lon, file_path):
 
 def load_local_model(model_name, dtype=torch.bfloat16, device="cuda"):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        dtype=dtype 
-    ).to(device)
+    if "mistralai" in model_name:
+        from transformers import Mistral3ForConditionalGeneration, MistralCommonBackend, FineGrainedFP8Config
+        model = Mistral3ForConditionalGeneration.from_pretrained(
+            model_name,
+            device_map=device,
+            dtype=dtype,
+        ) 
+    else :
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            dtype=dtype 
+        ).to(device)
     return model, tokenizer
 
 def write_to_csv(latitudes, longitudes, predictions, file_path):
