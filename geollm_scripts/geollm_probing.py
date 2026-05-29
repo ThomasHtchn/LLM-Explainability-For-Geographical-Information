@@ -57,6 +57,9 @@ def analyze_geollm_first_token(
 
     os.makedirs(output_dir, exist_ok=True)
 
+    if not end_layer:
+        end_layer = model.hidden_states[0]
+
     results_per_layer = {
         layer: {"lat": [], "lon": [], "digit": []}
         for layer in range(start_layer, end_layer + 1)
@@ -118,7 +121,7 @@ def parse_args():
                 help="LLM model from huggingface used for probing")
     p.add_argument("--start_layer", type=int, default=1,
                 help="starting layer")
-    p.add_argument("--end_layer", type=int, default=36,
+    p.add_argument("--end_layer", type=int, default=None,
                 help="end layer")
     p.add_argument("--top_k", default=10,
                 help="Top k to look at")

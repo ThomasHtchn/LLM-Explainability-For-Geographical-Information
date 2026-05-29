@@ -56,15 +56,15 @@ def get_hidden_states(model, tokenizer, inputs):
     generated_ids = model_outputs.sequences[0][len(inputs.input_ids[0]) :]
     prediction = tokenizer.decode(generated_ids, skip_special_tokens=True)
 
-    print(f"Model output : {prediction}")
-    return model_outputs.hidden_states[0]
+    return model_outputs.hidden_states[0], prediction
 
 def print_top_tokens_per_layer(prompt, expected_next_token, model, tokenizer, is_already_tokenized=False, apply_last_norm=False, start_layer=30, end_layer=36, top_k=20):
     if(not is_already_tokenized):
         inputs = tokenize_prompt(prompt, tokenizer, model)#, is_chat=True, prompt_system="The first token you generate should be the answer to the question.")
     else:
         inputs = prompt
-    hidden_states = get_hidden_states(model, tokenizer, inputs)
+    hidden_states, pred = get_hidden_states(model, tokenizer, inputs)
+    print(f"Model output : {pred}")
     lm_head = model.lm_head
     #print("Norme moyenne des embeddings du residual stream")
     for i, h in enumerate(hidden_states[start_layer:end_layer+1], start=start_layer):

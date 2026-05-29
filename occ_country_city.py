@@ -772,6 +772,7 @@ def plot_heatmap(
     city_meta: dict,
     n_docs: int,
     output_path: str,
+    ds_name: str,
     top_hover: int = 10,
 ) -> pd.DataFrame:
     """
@@ -983,7 +984,7 @@ def plot_heatmap(
         barmode="stack",
         title=dict(
             text=(
-                f"<b>Geographic Mention Heatmap — HuggingFaceFW/fineweb-edu"
+                f"<b>Geographic Mention Heatmap - {ds_name}"
                 f" ({n_docs:,} docs)</b><br>"
                 f"<sup>{total_mentions:,} total mentions across"
                 f" {n_countries} countries — NER-based detection</sup>"
@@ -1046,7 +1047,7 @@ def plot_heatmap(
 # ---------------------------------------------------------------------------
 def parse_args():
     p = argparse.ArgumentParser(
-        description="City & country mentions in fineweb-edu by continent",
+        description="City & country mentions in fineweb dataset by continent",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--cities",    default="data/cities1000.txt",
@@ -1170,7 +1171,7 @@ def main():
     elif args.task == "admin_level":
         plot_admin1(city_counter, city_meta, output_path)
     elif args.task == "heat_map":
-        plot_heatmap(city_counter, country_counter, city_meta, args.n_docs, output_path, args.top_hover)
+        plot_heatmap(city_counter, country_counter, city_meta, args.n_docs, output_path, args.dataset, args.top_hover)
 
 if __name__ == "__main__":
     main()
