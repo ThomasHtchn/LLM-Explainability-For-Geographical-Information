@@ -351,7 +351,7 @@ import os
 import sys
 
 VALID_TASKS = ["ISO_Code", "Dialing_Code", "Continent", "Capital"]
-VALID_MODELS = ["HuggingFaceTB/SmolLM3-3B"]
+VALID_MODELS = ["HuggingFaceTB/SmolLM3-3B", "Qwen/Qwen2.5-7B", "mistralai/Ministral-3-14B-Reasoning-2512"]
 
 def main():
     parser = argparse.ArgumentParser(description="Process a dataframe with a given task.",
