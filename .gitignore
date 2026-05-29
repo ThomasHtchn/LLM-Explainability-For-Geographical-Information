@@ -9,3 +9,6 @@ data
 allCountries.txt
 geonames.db
 geo_cache.pkl
+train_data
+models
+map_results
