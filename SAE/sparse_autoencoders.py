@@ -88,15 +88,14 @@ def train(model, loader, optimizer, device, sparsity_weight):
 
         x_hat, z = model(x)
 
-        #loss = loss_fn(x, x_hat, z, sparsity_weight)
-        loss = topk_loss_fn(x, x_hat)
+        loss = loss_fn(x, x_hat, z, sparsity_weight)
+        #loss = topk_loss_fn(x, x_hat) # topk
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # pour topk
-        model.normalize_decoder()
+        #model.normalize_decoder() # tpopk
 
         total_loss += loss.item()
 
@@ -112,7 +111,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--sparsity", type=float, default=1e-3)
+    parser.add_argument("--sparsity", type=float, default=0.01)
     parser.add_argument("--output", type=str, default="sae.pt")
     parser.add_argument("--scheduler_patience", type=int, default=10)
     parser.add_argument("--top_k", type=int, default=2048)
@@ -139,18 +138,20 @@ def main():
 
     print(f"input_dim = {input_dim}")
     print(f"hidden_dim = {hidden_dim}")
-    # import sys
-    # sys.exit(1)
+
+    name_prefix = (args.input_pkl).split("act")[1][:-4]
+    sparsity_str = str(args.sparsity).split(".")[1]
+    output_path = f"models/sae{name_prefix}_dim{hidden_dim}_sf{sparsity_str}"
 
     hidden_dim = args.hidden_dim * input_dim
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    #model = SparseAutoencoder(input_dim=input_dim, hidden_dim=hidden_dim, sparsity=args.sparsity).to(device)
-    model = SparseAutoencoderTopK(input_dim=input_dim, hidden_dim=hidden_dim, k=args.top_k).to(device)
+    model = SparseAutoencoder(input_dim=input_dim, hidden_dim=hidden_dim, sparsity=args.sparsity).to(device)
+    #model = SparseAutoencoderTopK(input_dim=input_dim, hidden_dim=hidden_dim, k=args.top_k).to(device) # topk
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=args.scheduler_patience, min_lr=1e-6)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=args.scheduler_patience, min_lr=1e-6)
+    #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6) # topk
 
     # early stopping
     best_loss = float("inf")
@@ -162,8 +163,8 @@ def main():
 
         loss = train(model, loader, optimizer, device, args.sparsity)
 
-        #scheduler.step(loss)
-        scheduler.step()
+        scheduler.step(loss)
+        #scheduler.step() # topk
         current_lr = optimizer.param_groups[0]["lr"]
         
         print(f"Epoch {epoch} | loss: {loss:.6f} | lr: {current_lr:.2e}")
@@ -171,8 +172,7 @@ def main():
         if loss < best_loss:
             best_loss = loss
             epochs_without_improvement = 0
-            torch.save(model.state_dict(), args.output)
-            print("Saved new best model")
+    
         else:
             epochs_without_improvement += 1
         
@@ -184,7 +184,11 @@ def main():
             )
             break
     training_time = time.time() - start_time 
-    print("Saved model:", args.output)
+
+    output_path = output_path + f"_epochs{epoch}.pt"
+    torch.save(model.state_dict(), output_path)
+
+    print("Saved model:", output_path)
     print(f"Training time: {int(training_time // 60)} m {int(training_time % 60)} s")
 
 

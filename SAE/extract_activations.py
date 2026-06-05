@@ -108,8 +108,7 @@ def main():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1,
-        help="Currently only batch_size=1 supported safely with hooks."
+        default=1
     )
 
     args = parser.parse_args()
