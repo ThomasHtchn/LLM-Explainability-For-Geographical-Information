@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
+import os
 
 
 def parse_layers(layer_str):
@@ -138,12 +139,11 @@ def main():
 
     device = next(model.parameters()).device
 
-    rows = []
-
+    rows = {layer: [] for layer in layers}
+    
     for _, row in tqdm(df.iterrows(), total=len(df)):
         geonameid = row["geonameid"]
         prompt = row["prompt"]
-
         try:
             acts_dict = extract_mlp_activations(
                 model=model,
@@ -152,16 +152,11 @@ def main():
                 layers=layers,
                 device=device,
             )
-
             for layer_idx, acts in acts_dict.items():
-                # acts:
-                # [seq_len, hidden_size]
-
+                # acts: [seq_len, hidden_size]
                 mean_pool = acts.mean(dim=0).numpy()
-
                 max_pool = acts.max(dim=0).values.numpy()
-
-                rows.append({
+                rows[layer_idx].append({
                     "geonameid": geonameid,
                     "prompt": prompt,
                     "layer": layer_idx,
@@ -169,15 +164,15 @@ def main():
                     "mean_pooling": mean_pool,
                     "max_pooling": max_pool,
                 })
-
         except Exception as e:
             print(f"Error processing geonameid={geonameid}: {e}")
 
-    out_df = pd.DataFrame(rows)
-
-    print(f"Saving to: {args.output_path}")
-
-    out_df.to_pickle(args.output_path)
+    output_dir = os.path.dirname(args.output_path)
+    for layer_idx, layer_rows in rows.items():
+        out_df = pd.DataFrame(layer_rows)
+        out_path = os.path.join(output_dir, f"mlp_act_world_10k_l{layer_idx}.pkl")
+        print(f"Saving layer {layer_idx} to: {out_path}")
+        out_df.to_pickle(out_path)
 
     print("Done.")
 

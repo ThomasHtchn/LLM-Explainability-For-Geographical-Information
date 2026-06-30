@@ -44,37 +44,10 @@ def loss_fn(x, x_hat, z, sparsity_weight):
     sparsity_loss = z.abs().mean()
     return recon_loss + sparsity_weight * sparsity_loss
 
-
-class SparseAutoencoderTopK(nn.Module):
-    def __init__(self, input_dim, hidden_dim, k):
-        super().__init__()
-        self.encoder = nn.Linear(input_dim, hidden_dim)
-        self.decoder = nn.Linear(hidden_dim, input_dim, bias=False)
-        self.k = k
-
-    def topk(self, z):
-        values, indices = torch.topk(z, self.k, dim=-1)
-        sparse = torch.zeros_like(z)
-        sparse.scatter_(dim=-1, index=indices, src=values)
-        return sparse
-
-    def forward(self, x):
-        z = self.encoder(x)
-        z = torch.relu(z)
-        f = self.topk(z)
-        x_hat = self.decoder(f)
-        return x_hat, f
-
-    @torch.no_grad()
-    def normalize_decoder(self):
-        w = self.decoder.weight.data
-        self.decoder.weight.data = (
-            w / (w.norm(dim=0, keepdim=True) + 1e-8)
-        )
-
-
-def topk_loss_fn(x, x_hat):
-    return ((x - x_hat) ** 2).mean()
+def normalize_loss_fn(x, x_hat, z, sparsity_weight):
+    recon_loss = (((x_hat - x) ** 2).mean(dim=1) / (x ** 2).mean(dim=1)).mean()
+    sparsity_loss = (z.abs().sum(dim=1) / (x.norm(dim=1))).mean() # + 1e-8
+    return recon_loss + sparsity_weight * sparsity_loss
 
 
 def train(model, loader, optimizer, device, sparsity_weight):
@@ -88,8 +61,9 @@ def train(model, loader, optimizer, device, sparsity_weight):
 
         x_hat, z = model(x)
 
-        loss = loss_fn(x, x_hat, z, sparsity_weight)
+        #loss = loss_fn(x, x_hat, z, sparsity_weight)
         #loss = topk_loss_fn(x, x_hat) # topk
+        loss = normalize_loss_fn(x, x_hat, z, sparsity_weight)
 
         optimizer.zero_grad()
         loss.backward()
@@ -114,6 +88,7 @@ def main():
     parser.add_argument("--sparsity", type=float, default=0.01)
     parser.add_argument("--output", type=str, default="sae.pt")
     parser.add_argument("--scheduler_patience", type=int, default=10)
+    parser.add_argument("--earlystop_patience", type=int, default=20)
     parser.add_argument("--top_k", type=int, default=2048)
 
     args = parser.parse_args()
@@ -155,7 +130,7 @@ def main():
 
     # early stopping
     best_loss = float("inf")
-    early_stopping_patience = 20
+    early_stopping_patience = args.earlystop_patience
     epochs_without_improvement = 0
 
     start_time = time.time()
@@ -185,7 +160,7 @@ def main():
             break
     training_time = time.time() - start_time 
 
-    output_path = output_path + f"_epochs{epoch}.pt"
+    output_path = output_path + f"_epochs{epoch + 1}.pt"
     torch.save(model.state_dict(), output_path)
 
     print("Saved model:", output_path)

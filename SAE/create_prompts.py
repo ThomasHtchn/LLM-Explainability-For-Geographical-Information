@@ -29,6 +29,18 @@ def get_cities(cur, population, countries):
 
     return cur.fetchall()
 
+def get_cities_world(cur, population):
+    query = (f"""
+    SELECT geonameid, name, latitude, longitude, country_code, population, admin_level, admin1, admin2
+    FROM geonames_gpe
+    WHERE feature_class = "P" 
+        and population > ?
+    """)
+    params = (population,)
+    cur.execute(query, params)
+
+    return cur.fetchall()
+
 def create_admin1_map(path):
     admin1_map = {}
 
@@ -104,9 +116,14 @@ def main():
     # fr_min_pop = 4000
     # south_min_pop = 1000
 
-    countries = resolve_places(args.places)
-    city_rows = get_cities(cur, min_pop, countries)
-    print(f"Number of prompts : {len(city_rows)}")
+    if args.places == "world":
+        city_rows = get_cities_world(cur, min_pop)
+        print(f"Number of prompts : {len(city_rows)}")
+
+    else:
+        countries = resolve_places(args.places)
+        city_rows = get_cities(cur, min_pop, countries)
+        print(f"Number of prompts : {len(city_rows)}")
 
     create_prompts(output_path, city_rows)
 
